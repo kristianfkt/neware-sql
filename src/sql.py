@@ -10,8 +10,8 @@ import tqdm
 import sys
 import numpy as np
 
-import transformers
-import writers
+from . import transformers
+from . import writers
 
 logger = logging.getLogger('Neware SQL')
 logging.basicConfig(level=logging.DEBUG)
@@ -151,7 +151,7 @@ class TestParser:
         """
         if callable(save_format):
             self.write = save_format
-        self.writer   = writers.writer(save_format.lower())
+        self.writer   = writers.get_writer(save_format.lower())
         self.filename = filename
         self.location = location
         return
@@ -212,7 +212,7 @@ class Repo:
         
         self.n_rows=n_rows
 
-        self.__testparser__   = TestParser(save_format=save_format, filename=filename, location=location, identify=identify)
+        self.__testparser__   = TestParser(save_format=save_format, filename=filename, location=location)
         self.__tests__        = self.__get_tests__()
         self.__notes__        = self.__get_notes__()        
         self.__table__        = self.__make_table__()
