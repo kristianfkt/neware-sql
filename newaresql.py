@@ -36,7 +36,7 @@ class Test:
         if update:
             max_seq_id = self.get_max_seq_id()
         
-        data = transformers.transform(
+        data = transformers.Transformer().transform(
             sql.download_test(self.connection_string, self.test, from_seq_id=max_seq_id, to_seq_id=n_rows))
         
         if update:
