@@ -4,20 +4,19 @@ The neware module has a capability of downloading data from the SQL database use
 # Getting Started
 
 ```
-import neware
-repo = neware.sql.Repo(connection_string, save_format='parquet', filename=None, location=None, identify=None, parallel=False, download=None, n_rows=None)
-repo.update()
+import newaresql
+repo = newaresql.Repo(connection_string, file_format='parquet', file_name=None, file_path=None, download=None)
+repo.download(update=True, parallel=False) #parallel=True or int has the risk of Malloc Error
 ```
-* User input
+* User input on initiation
     * connection_string on the format dialect+driver://username:password@host:port/database
-    * save_format: parquet, hdf, csv, excel, feather and latex currently supported. 
-    * fileame: None (default) or callable with signature func(test). Must return a string. 
-    * location: None (default) string, or callable with signature func(test). Must return a string. Data is saved at this location
-    * identify: None (default) or callable with signature func(test). Must return a string. Data is saved at /location/identify/ is identify is not None
-    * download: None (default) or callable with signature func(test). Dowload all tests, or tests where download(test) returns True. Must return True or False
-    * parallel: False (default), int or True. Use asyncronous parallel processing. Not sure if it offers any advantages, as bandwith is likely the limitation
-    * n_rows: For testing only. pass an integer to download only the first n_rows of each test
-
+    * file_format: parquet, hdf, csv, excel, feather, html and latex currently supported. 
+    * file_name: None (default) or callable with signature f(test). Must return a string. 
+    * save_path: None (default) string, or callable with signature f(test). Must return a string or pathlib.Path object. Data is saved at this location
+    * download: None (default) or callable with signature f(test). Return True or False to check if each specific test should be downloaded
+* User input on download():
+    * update: True or False. True will add only latest data. False will download the entire test
+    * parallel: Run sequential or asyncrounus in parallel. 
 
 TODO: Guide users through getting your code up and running on their own system. In this section you can talk about:
 1.	Installation process
