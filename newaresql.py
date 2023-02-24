@@ -52,7 +52,7 @@ class Test:
             max_seq_id = 0 
         return max_seq_id
 
-class Repo:
+class NewareDB:
     def __init__(self, 
             connection_string:str,
             file_format:typing.Union[str, callable]='parquet',
