@@ -10,38 +10,30 @@ import tqdm
 import sys
 import numpy as np
 
-from . import transformers
-from . import writers
+import transformers
+import writers
 
 logger = logging.getLogger('Neware SQL')
 logging.basicConfig(level=logging.DEBUG)
 
 
-
-
 #====================================================================================
-def path(root=None):
+def get_query(connection_string, query, retry=True, engine=None):
     """
-    Paths are organized
-    
-    ./neware/neware/
-    ./neware/data/
-    ./neware/tests/
-    
-    where root as standard is './neware/
-    """
-    pth = pathlib.Path(__file__).resolve().parent.parent
-    if isinstance(root, str):
-        pth = pth.joinpath(root)
-    return pth
+    Engine is created upon every query instance by default to allow parallel execution of queries
+    multiprocessing can not pickle an existing connection
 
-#====================================================================================
-def get_query(connection_string, query, retry=True):
+    #If None or nan appears in the query, empty dataframe is returned
+    Upon error, it makes a second attempt by default before returning empty dataframe upon the second failure.
+    """
     logger.debug(f'Fetching query {query}')
-    engine            = sqlalchemy.create_engine(connection_string)    
+    if engine is None:
+        engine = sqlalchemy.create_engine(connection_string)    
+
     if ('FROM None' in query) | ('FROM nan' in query):
         logger.debug(f'NaN or None in query {query}')
         data = pd.DataFrame()
+    
     else:
         try:
             data = pd.read_sql(query, engine, chunksize=None)
@@ -56,10 +48,10 @@ def get_query(connection_string, query, retry=True):
 
 #====================================================================================
 class Downloader:
-
     """
     Dowloads data between seq_id_min and seq_id_max and combines main and aux tables for a test
     Returns transformed data on the fly
+
     """
 
     def __init__(self, connection_string, parallel=False):
@@ -100,6 +92,7 @@ class Downloader:
             if (data_aux_first.empty) | (len(data_main_first.index) != len(data_aux_first.index)):
                 logger.debug(f'No first aux data in {test.filename}. Settting t_raw=NaN')
                 data_main_first['test_tmp'] = np.nan #missing
+
             elif len(data_main_first.index) == len(data_aux_first.index):
                 logger.debug(f'Joining first main and aux temperature in {test.filename}.')
                 data_main_first['test_tmp'] = data_aux_first['test_tmp']
@@ -111,6 +104,7 @@ class Downloader:
             if (data_aux_second.empty) | (len(data_main_second.index) != len(data_aux_second.index)):
                 logger.debug(f'No second aux data in {test.filename}. Settting t_raw=NaN')
                 data_main_second['test_tmp'] = np.nan #missing
+
             elif len(data_main_second.index) == len(data_aux_second.index):
                 logger.debug(f'Joining second main and aux temperature in {test.filename}.')
                 data_main_second['test_tmp'] = data_aux_second['test_tmp']
@@ -140,28 +134,25 @@ class Downloader:
 
 #====================================================================================
 class TestParser:
-    def __init__(self, save_format='parquet', filename=None, location=None, identify=None):
+    def __init__(self, save_format='parquet', filename=None, location=None):
         """
         save_format: Used to load the correct writer for saving data.
-                str: 
+                str: any if the build in methods
                 callable: must accept write(data), append(data), read()
 
         filename:
-                None: batch_on is used as filename
+                None: filename is by default batch_no-dev_uid-unit_id-chl_id-test_id
                 callable: Accepts a Test and returns a string without file extension
+                batch_no correspond to P/N in neware bts
         location: 
-                None: tests is saved under /data/
-                str: tests is saved under /location/
+                None: tests are saved under neware-sql/data/
+                str: tests are saved under /location/
                 callable:  Accepts a Test and returns a string. Location created on the fly
-        identify:
-                None: Does noting
-                callable: Accepts a Test and returns cell_name. Data is then saved under loaction/cell_name
         """
         if callable(save_format):
             self.write = save_format
         self.writer   = writers.writer(save_format.lower())
         self.filename = filename
-        self.identify = identify
         self.location = location
         return
 
@@ -174,10 +165,7 @@ class TestParser:
         """
         #No location callback: Use standard
         if self.location is None:
-            location = path(root='tests')
-            #Xheck for cell_name
-            if isinstance(test.cell_name, str):
-                    location = location.joinpath(test.cell_name)
+            location = pathlib.Path(__file__).resolve().parent.parent.joinpath('data')
 
         elif callable(self.location):
             location = self.location(test)
@@ -193,34 +181,17 @@ class TestParser:
     def filename_parser(self, test):
         if self.filename is None:
             filename = f'{test.info.batch_no}-{test.channel.unit.device.id}-{test.channel.unit.id}-{test.channel.id}-{test.id}'
+
         elif callable(self.filename):
             filename = self.filename(test)
+
         else:
             raise TypeError(f'Unknown type filename {type(sef.filename)}')
+
         test.filename = filename
         return filename
-
-    def identify_parser(self, test):
-        if self.identify is None:
-            identity = None
-        elif isinstance(self.identify, str):
-            identity = self.identify
-
-        elif callable(self.identify):
-            identity = self.identify(test)
-        else:
-            raise TypeError(f'Unknown type identify {type(self.identify)}')
-        test.cell_name = identity
-        return identity
         
-        
-    def parse(self,test):
-        # self.filename_parser(test)
-        # self.identify_parser(test)
-        # self.location_parser(test)
-        # test.writer = self.writer(test.save_location, test.filename)
-        return
-    
+
 class Repo:
     """
     Repo is initialized to download all sequentially data as parquet
@@ -228,7 +199,7 @@ class Repo:
     Use of a callback location function and/or identify is adviced
     n_rows can be set to some low value to only download the first n_rows of a dataset. 
     """
-    def __init__(self, connection_string, save_format='parquet', filename=None, location=None, identify=None, parallel=False, download=None, n_rows=None):
+    def __init__(self, connection_string, save_format='parquet', filename=None, location=None, parallel=False, download=None, n_rows=None):
 
         self.connection_string = connection_string
         self.__downloader__    = Downloader(connection_string, parallel=parallel)
@@ -445,10 +416,6 @@ class Test:
                         'aux_second': info['aux_second_query']}
         return
 
-    def parse(self):
-        #self.__parser__.parse(self)
-        return
-        
 
     def download(self, n_rows=None):
         try:
