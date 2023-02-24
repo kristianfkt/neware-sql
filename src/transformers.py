@@ -9,8 +9,6 @@ import tqdm
 from . import writers
 #import pickle
 #pickle.HIGHEST_PROTOCOL = 4
-logger = logging.getLogger('Neware Transformer')
-logging.basicConfig(level=logging.WARNING)
 
 #==================================================================================================================================================================
 # Helper functions

@@ -11,12 +11,10 @@ def get_query(connection_string, query, retry=True, engine=None):
     #If None or nan appears in the query, empty dataframe is returned
     Upon error, it makes a second attempt by default before returning empty dataframe upon the second failure.
     """
-    logger.debug(f'Fetching query {query}')
     if engine is None:
         engine = sqlalchemy.create_engine(connection_string)    
 
     if ('FROM None' in query) | ('FROM nan' in query):
-        logger.debug(f'NaN or None in query {query}')
         data = pd.DataFrame()
     
     else:
@@ -24,10 +22,8 @@ def get_query(connection_string, query, retry=True, engine=None):
             data = pd.read_sql(query, engine, chunksize=None)
         except Exception as e:
             if retry is True:
-                logger.warning(f'query {query} failed with error {e}. Retrying')
                 data = get_query(connection_string, query, retry=False)
             else:
-                logger.warning(f'query {query} failed with error {e}. Returning empty')
                 data = pd.DataFrame()
     return data  
 
