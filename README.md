@@ -23,7 +23,7 @@ db.download(update=True, parallel=False) #parallel=True or int has the risk of M
  - [ ] Add backup method to NewareDB class. Download all tables into a single directory
  - [ ] Add summarize to step method
  - [ ] Make GUI interface
- - [ ] Check if re-creating the engine on every instance is bad
+ - [ ] Refactor the sql connection to not initiate a new engine on every query
 
 TODO: Guide users through getting your code up and running on their own system. In this section you can talk about:
 1.	Installation process
