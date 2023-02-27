@@ -13,18 +13,17 @@ def get_query(connection_string, query, retry=True, engine=None):
     """
     if engine is None:
         engine = sqlalchemy.create_engine(connection_string)    
-
-    if ('FROM None' in query) | ('FROM nan' in query):
-        data = pd.DataFrame()
     
-    else:
-        try:
-            data = pd.read_sql(query, engine, chunksize=None)
-        except Exception as e:
-            if retry is True:
-                data = get_query(connection_string, query, retry=False)
-            else:
-                data = pd.DataFrame()
+    try:
+        with engine.connect() as connection:
+            data = pd.read_sql(query, connection, chunksize=None)
+        engine.dispose()
+        
+    except Exception as e:
+        if retry:
+            data = get_query(connection_string, query, retry=False)
+        else:
+            data = pd.DataFrame()
     return data  
 
 
