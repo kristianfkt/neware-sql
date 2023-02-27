@@ -4,7 +4,7 @@ import pandas as pd
 import multiprocessing
 import tqdm.auto as tqdm
 
-from src import new_sql as sql
+from src import sql
 from src import writers
 from src import transform
 
