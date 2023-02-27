@@ -6,7 +6,7 @@ import tqdm.auto as tqdm
 
 from src import new_sql as sql
 from src import writers
-from src import transformers
+from src import transform
 
 def download_worker(arg):
     test, kwargs = arg
@@ -16,7 +16,7 @@ class Test:
     def __init__(self, test, file_format, file_path, file_name, connection_string):
         self.test = test
         self.connection_string= connection_string
-        
+            
         if file_path is None:
             pathlib.Path(__file__).resolve().parent.joinpath('data')
 
@@ -33,16 +33,25 @@ class Test:
         return
 
     def download(self, update=True, n_rows=None):
-        if update:
+        #Basic checks
+        if not self.writer.exists:
+            update=False
+
+        if (update) & (self.writer.exists):
             max_seq_id = self.get_max_seq_id()
-        
-        data = transformers.Transformer().transform(
-            sql.download_test(self.connection_string, self.test, from_seq_id=max_seq_id, to_seq_id=n_rows))
-        
-        if update:
-            self.writer.append(data)
         else:
-            self.writer.write(data)
+            max_seq_id = 0
+        
+        try:
+            data = transform.data(
+                sql.download_test(self.connection_string, self.test, from_seq_id=max_seq_id, to_seq_id=n_rows))
+            if update:
+                self.writer.append(data)
+
+            else:
+                self.writer.write(data)
+        except Exception as e:
+            print(f'Error fetching,transforming or writing data {e}')
         return
 
     def get_max_seq_id(self):
@@ -95,6 +104,6 @@ class NewareDB:
             
             with multiprocessing.Pool(n_jobs) as pool:
                 bar = pool.imap_unordered(func=download_worker, iterable=download_worker_args)
-                for _ in tqdm.tqdm(bar, desc='Downloading data'):
+                for _ in tqdm.tqdm(bar, desc='Downloading data', total=len(download_list))  :
                     continue
         return    

@@ -28,6 +28,10 @@ def get_query(connection_string, query, retry=True, engine=None):
     return data  
 
 
+def get_sql_engine(connection_string):
+    return sqlalchemy.create_engine(connection_string)    
+
+
 def get_table(connection_string):
     
     #Get test notes
@@ -36,7 +40,7 @@ def get_table(connection_string):
     #Get tests and h_tests
     tests = pd.concat([
         get_query(connection_string, "SELECT * FROM test"),
-        get_query(connection_string, "SELECT * FROM _test")], ignore_index=True)
+        get_query(connection_string, "SELECT * FROM h_test")], ignore_index=True)
     
     #Remove duplicates
     tests.drop_duplicates(inplace=True)
@@ -45,8 +49,13 @@ def get_table(connection_string):
     tests['active'] = False
     tests.loc[pd.isnull(tests.end_time), 'active'] = True
 
-    #Return merged tests   
-    return tests.merge(notes, on=['dev_uid', 'unit_id', 'chl_id', 'test_id'])
+    #Return merged tests
+    table = tests.merge(notes, on=['dev_uid', 'unit_id', 'chl_id', 'test_id'])
+    table.loc[:,'main_first_query']  = 'SELECT * FROM ' + table['main_first_table'].astype(str)  + ' WHERE test_id=' + table['test_id'].astype(str) + ' AND unit_id=' + table['unit_id'].astype(str) + ' AND chl_id=' + table['chl_id'].astype(str)
+    table.loc[:,'main_second_query'] = 'SELECT * FROM ' + table['main_second_table'].astype(str) + ' WHERE test_id=' + table['test_id'].astype(str) + ' AND unit_id=' + table['unit_id'].astype(str) + ' AND chl_id=' + table['chl_id'].astype(str)
+    table.loc[:,'aux_first_query']   = 'SELECT * FROM ' + table['aux_first_table'].astype(str)   + ' WHERE test_id=' + table['test_id'].astype(str) + ' AND unit_id=' + table['unit_id'].astype(str) + ' AND chl_id=' + table['chl_id'].astype(str)
+    table.loc[:,'aux_second_query']  = 'SELECT * FROM ' + table['aux_second_table'].astype(str)  + ' WHERE test_id=' + table['test_id'].astype(str) + ' AND unit_id=' + table['unit_id'].astype(str) + ' AND chl_id=' + table['chl_id'].astype(str)   
+    return table
 
 
 def download_test(connection_string:str, test:pd.Series, from_seq_id:typing.Union[int,type(None)]=None, to_seq_id:typing.Union[int,type(None)]=None):
@@ -58,10 +67,10 @@ def download_test(connection_string:str, test:pd.Series, from_seq_id:typing.Unio
     if isinstance(to_seq_id, int):
         seq_id_str = seq_id_str + f' AND seq_id < {to_seq_id}'
 
-    data_main_first  = get_query(connection_string, test.queries['main_first']  + seq_id_str)
-    data_main_second = get_query(connection_string, test.queries['main_second'] + seq_id_str)
-    data_aux_first   = get_query(connection_string, test.queries['aux_first']   + seq_id_str)
-    data_aux_second  = get_query(connection_string, test.queries['aux_second']  + seq_id_str)     
+    data_main_first  = get_query(connection_string, test['main_first_query']  + seq_id_str)
+    data_main_second = get_query(connection_string, test['main_second_query'] + seq_id_str)
+    data_aux_first   = get_query(connection_string, test['aux_first_query']   + seq_id_str)
+    data_aux_second  = get_query(connection_string, test['aux_second_query']  + seq_id_str)     
 
     #Insert temperatures in first table if main is not empty
     if not data_main_first.empty:
@@ -78,7 +87,13 @@ def download_test(connection_string:str, test:pd.Series, from_seq_id:typing.Unio
 
         elif len(data_main_second.index) == len(data_aux_second.index):
             data_main_second['test_tmp'] = data_aux_second['test_tmp']
+    
+    if data_main_second.empty:
+        data = data_main_first.copy()
+    else:
+        data = pd.concat([data_main_first,data_main_second], ignore_index=True)
 
-    data = pd.concat([data_main_first,data_main_second], ignore_index=True)
-    data.loc[:, 'dev_uid'] = test.dev_uid
+    if not data.empty:
+        data.loc[:, 'dev_uid'] = test.dev_uid
+
     return data        
