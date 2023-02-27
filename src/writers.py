@@ -1,22 +1,23 @@
 import pathlib
 import pandas as pd
 
-def writer(format):
+def get_writer(format):
     formats = {
         'parquet':ParquetWriter,
         'hdf':HDFWriter,
         'csv':CSVWriter,
         'feather':FeatherWriter,
         'excel':ExcelWriter,
-        'latex':LaTeXWriter
+        'latex':LaTeXWriter,
+        'html':HTMLWriter,
     }
-    return formats[format]
+    return formats[format.lower()]
 
 
-class BaseWriter:
+class FileHandler:
     def __init__(self, root, name, extension):
         """
-        Make sure root as a pathlib.Path oject
+        ./root/name.extension
         """
         if isinstance(root, str):
             root = pathlib.Path(root).resolve()
@@ -43,7 +44,7 @@ class BaseWriter:
             self.path.unlink()
         return
 
-class ParquetWriter(BaseWriter):
+class ParquetWriter(FileHandler):
     def __init__(self, root, name):
         super().__init__(root, name, '.parquet')
         return
@@ -63,7 +64,7 @@ class ParquetWriter(BaseWriter):
         return pd.read_parquet(self.path, columns=columns)
 
 
-class CSVWriter(BaseWriter):
+class CSVWriter(FileHandler):
     def __init__(self, root, name):
         super().__init__(root, name, '.csv')
         return
@@ -85,7 +86,7 @@ class CSVWriter(BaseWriter):
             columns=[columns]        
         return pd.read_csv(self.path, usecols=columns)
 
-class HDFWriter(BaseWriter):
+class HDFWriter(FileHandler):
     def __init__(self, root, name):
         super().__init__(root, name, '.hdf')
         return
@@ -107,7 +108,7 @@ class HDFWriter(BaseWriter):
             columns=[columns]        
         return pd.read_hdf(self.path, columns=columns)
     
-class FeatherWriter(BaseWriter):
+class FeatherWriter(FileHandler):
     def __init__(self, root, name):
         super().__init__(root, name, '.feather')
         return
@@ -126,7 +127,7 @@ class FeatherWriter(BaseWriter):
             columns=[columns]
         return pd.read_feather(self.path, columns=columns)
 
-class ExcelWriter(BaseWriter):
+class ExcelWriter(FileHandler):
     def __init__(self, root, name):
         super().__init__(root, name, '.xlsx')
         return
@@ -145,7 +146,7 @@ class ExcelWriter(BaseWriter):
             columns=[columns]
         return pd.read_excel(self.path, sheet_name='data', columns=columns)
 
-class LaTeXWriter(BaseWriter):
+class LaTeXWriter(FileHandler):
     def __init__(self, root, name):
         super().__init__(root, name, '.tex')
         return
@@ -169,6 +170,25 @@ class LaTeXWriter(BaseWriter):
         if isinstance(columns, list):
             data = data.loc[:, columns]
         return data
+
+class HTMLWriter(FileHandler):
+    def __init__(self, root, name):
+        super().__init__(root, name, '.html')
+        return
+
+    def write(self, data):
+        self.makeroot()
+        data.to_html(self.path)
+        return
+    
+    def append(self, data):
+        self.write(pd.concat([self.read(), data], axis=0, ignore_index=True))
+        return
+    
+    def read(self, columns=None):
+        if isinstance(columns, str):
+            columns=[columns]
+        return pd.read_html(self.path, columns=columns)        
 
 if  __name__=='__main__':
     pass
