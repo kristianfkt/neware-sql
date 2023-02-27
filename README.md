@@ -2,11 +2,10 @@
 The neware module has a capability of downloading data from the SQL database used in the background by Neware. The module updates tests with the latest data on each run, i.e. no downloading of large files multiple times.
 
 # Getting Started
-
 ```
 import newaresql
-repo = newaresql.Repo(connection_string, file_format='parquet', file_name=None, file_path=None, download=None)
-repo.download(update=True, parallel=False) #parallel=True or int has the risk of Malloc Error
+db = newaresql.NewareDB(connection_string, file_format='parquet', file_name=None, file_path=None, download=None)
+db.download(update=True, parallel=False) #parallel=True or int has the risk of Malloc Error
 ```
 * User input on initiation
     * connection_string on the format dialect+driver://username:password@host:port/database
@@ -17,6 +16,13 @@ repo.download(update=True, parallel=False) #parallel=True or int has the risk of
 * User input on download():
     * update: True or False. True will add only latest data. False will download the entire test
     * parallel: Run sequential or asyncrounus in parallel. 
+
+# Do to
+ - [ ] Test class should interact with test ad datafile both ways
+ - [ ] Add plot methods to test class
+ - [ ] Add backup method to NewareDB class. Download all tables into a single directory
+ - [ ] Add summarize to step method
+ - [ ] Make GUI interface
 
 TODO: Guide users through getting your code up and running on their own system. In this section you can talk about:
 1.	Installation process
