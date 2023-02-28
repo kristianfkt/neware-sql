@@ -9,6 +9,8 @@ db.download(update=True, parallel=False) #parallel=True or int has the risk of M
 ```
 * User input on initiation
     * connection_string on the format dialect+driver://username:password@host:port/database
+      * sqlite://user:password@your_server_ip:port/db_name
+      * mysql+pymysql://user:password@your_server_ip:port/db_name
     * file_format: parquet, hdf, csv, excel, feather, html and latex currently supported. 
     * file_name: None (default) or callable with signature f(test). Must return a string. 
     * save_path: None (default) string, or callable with signature f(test). Must return a string or pathlib.Path object. Data is saved at this location
