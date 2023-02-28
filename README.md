@@ -8,22 +8,23 @@ db = newaresql.NewareDB(connection_string, file_format='parquet', file_name=None
 db.download(update=True, parallel=False) #parallel=True or int has the risk of Malloc Error
 ```
 * User input on initiation
-    * connection_string on the format dialect+driver://username:password@host:port/database
-      * sqlite://user:password@your_server_ip:port/db_name
-      * mysql+pymysql://user:password@your_server_ip:port/db_name
+    * connection_string on the format:
+      * dialect+driver://username:password@host:port/database_name
+      * sqlite://username:password@your_server_ip:port/database_name
+      * mysql+pymysql://username:password@your_server_ip:port/database_name
     * file_format: parquet, hdf, csv, excel, feather, html and latex currently supported. 
     * file_name: None (default) or callable with signature f(test). Must return a string. 
     * save_path: None (default) string, or callable with signature f(test). Must return a string or pathlib.Path object. Data is saved at this location
     * download: None (default) or callable with signature f(test). Return True or False to check if each specific test should be downloaded
-* User input on download():
+* User input to download():
     * update: True or False. True will add only latest data. False will download the entire test
     * parallel: Run sequential or asyncrounus in parallel. 
 
 # Do to
- - [ ] Test class should interact with test ad datafile both ways
+ - [ ] Test class should be and interface to sql and data
  - [ ] Add plot methods to test class
  - [ ] Add backup method to NewareDB class. Download all tables into a single directory
- - [ ] Add summarize to step method
+ - [ ] Add "summarize test to steps" method
  - [ ] Make GUI interface
  - [ ] Refactor the sql connection to not initiate a new engine on every query
 
