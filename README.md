@@ -1,5 +1,5 @@
 # DISCLAIMER 20.02.2025
-This code is old now. We have invested in more equipment and upgraded our BTS server. The new server has a different schema than the old one. Some cyclers also have differences in the data tables. Your server and hardware may not be supported. 
+This code is old now. We have invested in more equipment and upgraded our BTS server. The new server has a different schema than the old one. Some cyclers also have differences in the data tables. Your server and hardware may not be supported. Updates will suddenly appear.  
 
 # Introduction 
 The neware module has a capability of downloading data from the SQL database used in the background by Neware. The module updates tests with the latest data on each run, i.e. no downloading of large files multiple times.
