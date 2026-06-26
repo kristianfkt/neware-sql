@@ -144,7 +144,4 @@ dmypy.json
 cython_debug/
 
 # User - specific folder
-data/
-plots/
-notebook.ipynb
-.vscode/
+testing.ipynb

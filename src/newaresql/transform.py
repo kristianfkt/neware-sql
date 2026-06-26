@@ -1,41 +1,5 @@
 import polars as pl
 
-from newaresql.bts import BTSVersion
-
-# ==============================
-# Voltage transformation mappings
-# ==============================
-MAPPING_VOLTAGE = {
-    BTSVersion.BTS63: pl.col("test_vol") / pl.lit(1000),
-    BTSVersion.BTS84: pl.col("test_vol") / pl.lit(1000),
-}
-
-# ==============================
-# Current transformation mappings
-# ==============================
-MAPPING_CURRENT = {
-    BTSVersion.BTS63: pl.col("test_cur") / pl.lit(1000),
-    BTSVersion.BTS84: pl.col("test_cur") / pl.lit(1000),
-}
-
-# =============================
-# Time transformation mappings
-# =============================
-
-MAPPING_TIME = {
-    BTSVersion.BTS63: pl.col("test_time") / pl.lit(1000),
-    BTSVersion.BTS84: pl.col("test_time") / pl.lit(1000),
-}
-
-# =============================
-# Temperature transformation mappings
-# =============================
-MAPPING_TEMPERATURE = {
-    BTSVersion.BTS63: pl.col("test_temp") / pl.lit(10),
-    BTSVersion.BTS84: pl.col("test_temp") / pl.lit(10),
-}
-
-
 BDF_MAPPING = {
     "seq_id": "Record Count / 1",
     "cycle": "Cycle Count / 1",
@@ -43,26 +7,45 @@ BDF_MAPPING = {
     "test_time": "Step Time / s",
     "test_vol": "Voltage / V",
     "test_cur": "Current / A",
-    "test_temp": "Temperature / degC",
+    "test_tmp": "Temperature / degC",
 }
 
 
 def to_bdf(data: pl.DataFrame) -> pl.DataFrame:
-    return data.rename(columns=BDF_MAPPING)
+    return data.rename(BDF_MAPPING, strict=False)
 
 
-TRANSFORM_MAPPING = {
-    "test_cur": MAPPING_CURRENT,
-    "test_vol": MAPPING_VOLTAGE,
-    "test_time": MAPPING_TIME,
-    "test_tmp": MAPPING_TEMPERATURE,
+def _transform_24(data: pl.DataFrame) -> pl.DataFrame:
+    expressions = [
+        (pl.col("test_vol") / 10000.0).alias("test_vol"),
+        (pl.col("test_cur") / 10000.0).alias("test_cur"),
+        (pl.col("test_time") / 1000.0).alias("test_time"),
+        (pl.col("test_tmp") / 10.0).alias("test_tmp"),
+    ]
+
+    return data.with_columns(*expressions)
+
+
+def _transform_26(data: pl.DataFrame) -> pl.DataFrame:
+    expressions = [
+        (pl.col("test_vol") / 10000.0).alias("test_vol"),
+        (pl.col("test_cur") / 10000.0).alias("test_cur"),
+        (pl.col("test_time") / 1000.0).alias("test_time"),
+        (pl.col("test_tmp") / 10.0).alias("test_tmp"),
+    ]
+
+    return data.with_columns(*expressions)
+
+
+DISPATCH = {
+    "24": _transform_24,
+    "26": _transform_26,
 }
 
 
-def transform(data, version: BTSVersion) -> pl.DataFrame:
-    expressions = [
-        mapping[column][version].alias(column)
-        for column, mapping in TRANSFORM_MAPPING.items()
-        if column in data.columns
-    ]
-    return data.with_columns(expressions)
+def transform(data, test: dict) -> pl.DataFrame:
+    dev_uid = test.get("dev_uid")
+    dev_type = str(dev_uid)[0:2]
+    if dev_type not in DISPATCH:
+        raise ValueError(f"Unsupported device type: {dev_type}")
+    return to_bdf(DISPATCH[dev_type](data)).select(*list(BDF_MAPPING.values()))

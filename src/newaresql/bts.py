@@ -1,6 +1,6 @@
 from enum import Enum
 
 
-class BTSVersion(Enum):
-    BTS63 = "bts63"
-    BTS84 = "bts84"
+class DeviceType(Enum):
+    _24 = "24"
+    _26 = "26"
