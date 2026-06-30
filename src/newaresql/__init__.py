@@ -1,2 +1,3 @@
-def main() -> None:
-    print("Hello from neware-sql!")
+from newaresql.connect import connect
+
+__all__ = ["connect"]

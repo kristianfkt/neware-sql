@@ -8,7 +8,9 @@ authors = [
 ]
 requires-python = ">=3.11"
 dependencies = [
+    "pandas>=3.0.4",
     "polars",
+    "pyarrow>=24.0.0",
     "pymysql>=1.2.0",
     "sqlalchemy",
 ]

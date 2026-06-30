@@ -1,10 +1,13 @@
-from contextlib import contextmanager
-from typing import Generator
+import datetime
+import logging
+from typing import Generator, Sequence
 
 import polars as pl
 import sqlalchemy as sa
 
-from newaresql.transform import transform
+from newaresql.schemas import get_data_schema
+
+logger = logging.getLogger(__name__)
 
 
 class Connector:
@@ -23,9 +26,15 @@ class Connector:
         self._user = user
         self._password = password
         self._database = database
-        self._engine = sa.create_engine(
-            f"mysql+pymysql://{user}:{password}@{host}:{port}/{database}"
+        self._url = sa.URL.create(
+            drivername="mysql+pymysql",
+            username=user,
+            password=password,
+            host=host,
+            port=port,
+            database=database,
         )
+        self._engine = sa.create_engine(self._url)
         return
 
     @property
@@ -49,42 +58,101 @@ class Connector:
         return self._engine
 
     @property
+    def url(self) -> sa.engine.URL:
+        return self._url
+
+    @property
     def tables(self) -> list[str]:
         with self._engine.connect() as conn:
             return sa.inspect(conn).get_table_names()
 
     @property
     def version(self) -> str:
-        version = (
+        versions = (
             self.query("SELECT DISTINCT version FROM db_ver")
             .select("version")
             .to_series()
+            .unique()
+            .to_list()
         )
-        if version.n_unique() != 1:
+        if len(versions) != 1:
             raise ValueError(
-                f"Expected one version, got {version.n_unique()} versions: {version.unique()}"
+                f"Expected one version, got {len(versions)} versions: {versions}"
             )
-        return str(version.first())
+        return str(versions[0])
+
+    @property
+    def tests(self) -> list[dict]:
+        return self.get_tests().to_dicts()
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        self._engine.dispose()
+        self.dispose()
         return
 
-    def _wrap_table(self, table: str) -> sa.Table:
+    def compile_statement(self, stmt: sa.Selectable) -> str:
+        """
+        Compile a SQLAlchemy statement to a string.
+        """
+        return str(
+            stmt.compile(
+                dialect=self._engine.dialect,
+                compile_kwargs={"literal_binds": True},
+            )
+        )
+
+    def wrap_table(self, table: str) -> sa.Table:
+        """
+        Wrap a table name from the database in a SQLAlchemy Table object.
+        """
         return sa.Table(table, sa.MetaData(), autoload_with=self._engine)
 
-    def _select_table(
+    def get_table_schema(self, table: str) -> dict[str, type]:
+        """
+        Get the schema of a table from the database.
+        """
+        _t = self.wrap_table(table)
+        pytypes: dict[type[sa.types.TypeEngine], type] = {
+            sa.types.Integer: int,
+            sa.types.Float: float,
+            sa.types.Numeric: float,
+            sa.types.String: str,
+            sa.types.Text: str,
+            sa.types.DateTime: datetime.datetime,
+            sa.types.Date: datetime.date,
+            sa.types.Boolean: bool,
+        }
+
+        def aspytype(sqltype: sa.types.TypeEngine) -> type:
+            return pytypes.get(sqltype._type_affinity, object)
+
+        return {col.name: aspytype(col.type) for col in _t.columns}
+
+    def select_table(
         self,
         table: str | sa.Table,
-        columns: list[str] | None = None,
+        columns: str | Sequence[str] | None = None,
         where: dict | None = None,
     ) -> sa.Selectable:
+        """
+        Select a table from the database, optionally filtering by columns and where conditions.
+        where supports:
+        - equality: {"col": value}
+        - range: {"col": (min, max)} where min or max can be None
+            (min, max) is inclusive
+            (min, None) is equivalent to >= min
+            (None, max) is equivalent to <= max
+        """
 
         if isinstance(table, str):
-            table = self._wrap_table(table)
+            table = self.wrap_table(table)
+
+        if isinstance(columns, str):
+            columns = [columns]
+        if isinstance(columns, Sequence):
+            columns = list(columns)
 
         if columns is None:
             stmt = sa.select(table)
@@ -108,22 +176,37 @@ class Connector:
 
         return stmt
 
-    def _select_union(
+    def select_union(
         self,
-        *tables: str | sa.Table | None,
-        columns: list[str] | None = None,
-        where: dict | None = None,
-    ) -> sa.Selectable | None:
-        _t = [
-            self._wrap_table(t) if isinstance(t, str) else t
-            for t in tables
-            if t is not None
-        ]
-        if len(_t) == 0:
-            return None
+        *tables: str | sa.Table,
+        columns: str | Sequence[str] | None = None,
+        wheres: Sequence[dict | None] | dict | None = None,
+    ) -> sa.Selectable:
+        """
+        A lot of tables share the same schema, and may be queried together.
+        Wraps _select_table in a union_all.
+        Union select will only include common columns across all tables, unless columns is specified, sorted alphabetically.
+        """
+        _t = [self.wrap_table(t) if isinstance(t, str) else t for t in tables]
+
+        if wheres is None:
+            wheres = [None] * len(_t)
+        if isinstance(wheres, dict):
+            wheres = [wheres] * len(_t)
+
+        if isinstance(columns, str):
+            columns = [columns]
+        if isinstance(columns, Sequence):
+            columns = list(columns)
+
+        if len(_t) != len(wheres):
+            raise ValueError(
+                f"Number of tables ({len(_t)}) and wheres ({len(wheres)}) must match"
+            )
 
         if len(_t) == 1:
-            return self._select_table(_t[0], columns=columns, where=where)
+            return self.select_table(_t[0], columns=columns, where=wheres[0])
+
         else:
             if columns is None:
                 cols = set(_t[0].columns.keys())
@@ -131,77 +214,270 @@ class Connector:
                     cols = cols.intersection(set(wrap.columns.keys()))
                 columns = list(sorted(cols))
             return sa.union_all(
-                *[self._select_table(wrap, columns=columns, where=where) for wrap in _t]
+                *[
+                    self.select_table(wrap, columns=columns, where=where)
+                    for wrap, where in zip(_t, wheres)
+                ]
             )
 
-    def query(self, query: str | sa.TextClause | sa.Selectable) -> pl.DataFrame:
+    def make_main_statement(
+        self,
+        test: dict,
+        where: dict | None = None,
+        columns: str | Sequence[str] | None = None,
+    ) -> sa.Selectable:
+        """
+        Make a SQLAlchemy statement to select main data for a test.
+        """
+        if test.get("main_second_table") is not None:
+            stmt = self.select_union(
+                test["main_first_table"],
+                test["main_second_table"],
+                columns=columns,
+                wheres=[
+                    {
+                        **(where or {}),
+                        "unit_id": test["unit_id"],
+                        "chl_id": test["chl_id"],
+                        "test_id": test["test_id"],
+                    },
+                    where,
+                ],
+            )
+        else:
+            stmt = self.select_table(
+                test["main_first_table"],
+                columns=columns,
+                where={
+                    **(where or {}),
+                    "unit_id": test["unit_id"],
+                    "chl_id": test["chl_id"],
+                    "test_id": test["test_id"],
+                },
+            )
+        return stmt
+
+    def make_aux_statement(
+        self,
+        test: dict,
+        where: dict | None = None,
+        columns: str | Sequence[str] | None = None,
+    ) -> sa.Selectable | None:
+        """
+        Make a SQLAlchemy statement to select auxiliary data for a test.
+        """
+        if (test.get("aux_first_table") is None) and (
+            test.get("aux_second_table") is None
+        ):
+            stmt = None
+
+        elif (test.get("aux_second_table") is not None) and (
+            test.get("aux_first_table") is not None
+        ):
+            stmt = self.select_union(
+                test["aux_first_table"],
+                test["aux_second_table"],
+                columns=columns,
+                wheres=[
+                    {
+                        **(where or {}),
+                        "unit_id": test["unit_id"],
+                        "chl_id": test["chl_id"],
+                        "test_id": test["test_id"],
+                    },
+                    where,
+                ],
+            )
+        elif (test.get("aux_first_table") is not None) and (
+            test.get("aux_second_table") is None
+        ):
+            stmt = self.select_table(
+                test["aux_first_table"],
+                columns=columns,
+                where={
+                    **(where or {}),
+                    "unit_id": test["unit_id"],
+                    "chl_id": test["chl_id"],
+                    "test_id": test["test_id"],
+                },
+            )
+
+        elif (test.get("aux_first_table") is None) and (
+            test.get("aux_second_table") is not None
+        ):
+            stmt = self.select_table(
+                test["aux_second_table"],
+                columns=columns,
+                where={
+                    **(where or {}),
+                    "unit_id": test["unit_id"],
+                    "chl_id": test["chl_id"],
+                    "test_id": test["test_id"],
+                },
+            )
+        return stmt
+
+    def make_main_query(
+        self,
+        test: dict,
+        where: dict | None = None,
+        columns: str | Sequence[str] | None = None,
+    ) -> str:
+        """
+        Make a SQLAlchemy statement to select main data for a test.
+        """
+        stmt = self.make_main_statement(test, where=where, columns=columns)
+        return self.compile_statement(stmt)
+
+    def make_aux_query(
+        self,
+        test: dict,
+        where: dict | None = None,
+        columns: str | Sequence[str] | None = None,
+    ) -> str | None:
+        """
+        Make a SQLAlchemy statement to select auxiliary data for a test.
+        """
+        stmt = self.make_aux_statement(test, where=where, columns=columns)
+        if stmt is not None:
+            return self.compile_statement(stmt)
+        else:
+            return None
+
+    def query(
+        self,
+        query: str | sa.TextClause | sa.Selectable,
+        schema: dict | None = None,
+    ) -> pl.DataFrame:
         with self._engine.connect() as conn:
-            return pl.read_database(query, conn)
+            return pl.read_database(query, conn, schema_overrides=schema)
 
     def stream(
-        self, query: str | sa.TextClause | sa.Selectable, chunksize: int = 1
+        self,
+        query: str | sa.TextClause | sa.Selectable,
+        schema: dict | None = None,
+        chunksize: int = 100000,
     ) -> Generator[pl.DataFrame, None, None]:
-        with self._engine.connect() as conn:
+        with self._engine.connect().execution_options(
+            stream_results=True, yield_per=chunksize
+        ) as conn:
             yield from pl.read_database(
                 query,
-                conn.execution_options(stream_results=True),
+                conn,
                 iter_batches=True,
                 batch_size=chunksize,
+                schema_overrides=schema,
             )
+
+    def get_table(
+        self,
+        table: str,
+        columns: str | Sequence[str] | None = None,
+        where: dict | None = None,
+    ) -> pl.DataFrame:
+        """
+        Get a table from the database as a Polars DataFrame.
+        """
+        stmt = self.select_table(table, columns=columns, where=where)
+        return self.query(stmt)
+
+    def stream_table(
+        self,
+        table: str,
+        columns: str | Sequence[str] | None = None,
+        where: dict | None = None,
+        chunksize: int = 100000,
+    ) -> Generator[pl.DataFrame, None, None]:
+        """
+        Stream a table from the database as a Polars DataFrame.
+        """
+        stmt = self.select_table(table, columns=columns, where=where)
+        yield from self.stream(stmt, chunksize=chunksize)
+
+    def get_main_data(
+        self,
+        test: dict,
+        where: dict | None = None,
+        columns: str | Sequence[str] | None = None,
+    ) -> pl.DataFrame:
+
+        stmt = self.make_main_statement(test, where=where, columns=columns)
+
+        if isinstance(columns, str):
+            columns = [columns]
+        if isinstance(columns, Sequence):
+            columns = list(columns)
+        schema = get_data_schema(self.version, test["dev_uid"])["main"]
+        if columns is not None:
+            schema = {k: v for k, v in schema.items() if k in columns}
+        data = self.query(stmt, schema=schema)
+        return data
+
+    def get_aux_data(
+        self,
+        test: dict,
+        where: dict | None = None,
+        columns: str | Sequence[str] | None = None,
+    ) -> pl.DataFrame | None:
+
+        stmt = self.make_aux_statement(test, where=where, columns=columns)
+        if stmt is None:
+            return None
+
+        if isinstance(columns, str):
+            columns = [columns]
+        if isinstance(columns, Sequence):
+            columns = list(columns)
+        schema = get_data_schema(self.version, test["dev_uid"])["aux"]
+        if columns is not None:
+            schema = {k: v for k, v in schema.items() if k in columns}
+        data = self.query(stmt, schema=schema)
+        return data
+
+    def stream_main_data(
+        self,
+        test: dict,
+        where: dict | None = None,
+        columns: str | Sequence[str] | None = None,
+        chunksize: int = 100000,
+    ) -> Generator[pl.DataFrame, None, None]:
+
+        stmt = self.make_main_statement(test, where=where, columns=columns)
+        if isinstance(columns, str):
+            columns = [columns]
+        if isinstance(columns, Sequence):
+            columns = list(columns)
+        schema = get_data_schema(self.version, test["dev_uid"])["main"]
+        if columns is not None:
+            schema = {k: v for k, v in schema.items() if k in columns}
+        yield from self.stream(stmt, chunksize=chunksize, schema=schema)
+
+    def stream_aux_data(
+        self,
+        test: dict,
+        where: dict | None = None,
+        columns: str | Sequence[str] | None = None,
+        chunksize: int = 100000,
+    ) -> Generator[pl.DataFrame, None, None]:
+        stmt = self.make_aux_statement(test, where=where, columns=columns)
+        if stmt is None:
+            return
+
+        if isinstance(columns, str):
+            columns = [columns]
+        if isinstance(columns, Sequence):
+            columns = list(columns)
+        schema = get_data_schema(self.version, test["dev_uid"])["aux"]
+        if columns is not None:
+            schema = {k: v for k, v in schema.items() if k in columns}
+        yield from self.stream(stmt, chunksize=chunksize, schema=schema)
 
     def get_tests(self) -> pl.DataFrame:
         raise NotImplementedError("get_tests() must be implemented in subclasses")
 
-    def get_data(self, test: dict, where: dict | None = None) -> pl.DataFrame:
-
-        where = {
-            **(where or {}),
-            "unit_id": test["unit_id"],
-            "chl_id": test["chl_id"],
-            "test_id": test["test_id"],
-        }
-
-        main = self._select_union(
-            test.get("main_first_table"),
-            test.get("main_second_table"),
-            where=where,
-        )
-        aux = self._select_union(
-            test.get("aux_first_table"),
-            test.get("aux_second_table"),
-            where=where,
-            columns=[
-                "unit_id",
-                "chl_id",
-                "test_id",
-                "seq_id",
-                "test_tmp",
-                "auxchl_id",
-            ],
-        )
-
-        if main is None:
-            raise ValueError("Expected at least one main table")
-        if aux is None:
-            stmt = main
-        else:
-            _main = main.subquery("main")  # ty:ignore[unresolved-attribute]
-            _aux = aux.subquery("aux")  # ty:ignore[unresolved-attribute]
-
-            on = (
-                (_main.c["unit_id"] == _aux.c["unit_id"])
-                & (_main.c["chl_id"] == _aux.c["chl_id"])
-                & (_main.c["test_id"] == _aux.c["test_id"])
-                & (_main.c["seq_id"] == _aux.c["seq_id"])
-            )
-
-            aux_cols = ["test_tmp", "auxchl_id"]
-            main_cols = [c for c in _main.c.keys() if c not in aux_cols]
-            stmt = sa.select(
-                *[_main.c[c] for c in main_cols], *[_aux.c[c] for c in aux_cols]
-            ).select_from(_main.outerjoin(_aux, on))
-
-        return transform(self.query(stmt), test)
+    def dispose(self):
+        self._engine.dispose()
+        return
 
 
 class Version0760Connector(Connector):
@@ -218,21 +494,23 @@ class Version0760Connector(Connector):
 
 class Version0800Connector(Connector):
     def get_tests(self) -> pl.DataFrame:
-        tables = list(filter(lambda t: t.startswith("h_test"), self.tables))
-        tables.insert(0, "test")
+        tables = [
+            "test",
+            *sorted(t for t in self.tables if t.startswith("h_test")),
+        ]
         return pl.concat(
             [self.query(f"SELECT * FROM {table}") for table in tables],
             how="diagonal_relaxed",
         ).sort("dev_uid", "unit_id", "chl_id", "test_id")
 
 
-CONNECTOR_MAPPING = {
+CONNECTORS = {
     "0760": Version0760Connector,
     "0800": Version0800Connector,
 }
 
 
-def make(
+def connect(
     *,
     host: str,
     port: int,
@@ -251,35 +529,13 @@ def make(
         version = conn.version
         if not version:
             raise ValueError("Failed to determine BTS version")
-        if version not in CONNECTOR_MAPPING:
+        if version not in CONNECTORS:
             raise ValueError(f"Unsupported BTS version: {version}")
 
-    return CONNECTOR_MAPPING[version](
+    return CONNECTORS[version](
         host=host,
         port=port,
         user=user,
         password=password,
         database=database,
     )
-
-
-@contextmanager
-def connect(
-    *,
-    host: str,
-    port: int,
-    user: str,
-    password: str,
-    database: str,
-) -> Generator[Connector, None, None]:
-    connector = make(
-        host=host,
-        port=port,
-        user=user,
-        password=password,
-        database=database,
-    )
-    try:
-        yield connector
-    finally:
-        connector._engine.dispose()
