@@ -3,48 +3,9 @@ import logging
 import polars as pl
 
 logger = logging.getLogger(__name__)
-_BDF_MAPPING = {
-    "unix_time": "Unix Time / s",
-    "test_atime": "Time / datetime",
-    "seq_id": "Record Count / 1",
-    "cycle": "Cycle Count / 1",
-    "step_type": "Step Type / 1",
-    "step_id": "Step ID / 1",
-    "test_time": "Step Time / s",
-    "test_vol": "Voltage / V",
-    "test_cur": "Current / A",
-    "test_tmp": "Temperature / degC",
-    "test_capchg": "Step Charging Capacity / Ah",
-    "test_capdchg": "Step Discharging Capacity / Ah",
-    "test_engchg": "Step Charging Energy / Wh",
-    "test_engdchg": "Step Discharging Energy / Wh",
-    "test_cap": "Step Capacity / Ah",
-    "test_eng": "Step Energy / Wh",
-    "test_pow": "Power / W",
-    "auxchl_id": "Aux Channel ID / 1",
-    "test_totaltime": "Test Time / s",
-    "step_index": "Step Index / 1",
-    "step_count": "Step Count / 1",
-}
 
 
-def wrap_nullcheck(expression: pl.Expr) -> pl.Expr:
-    """
-    Wraps a polars expression with a null check.
-    If any of the columns in the expression are null, the entire expression will return None.
-    This is useful for ensuring that calculations do not crash with incomplete data.
-    """
-    columns = set(expression.meta.root_names())
-    if columns:
-        logger.debug(f"Wrapping expression with null check for columns: {columns}")
-        nullcheck = pl.any_horizontal(*(pl.col(col).is_null() for col in columns))
-        expression = pl.when(nullcheck).then(pl.lit(None)).otherwise(expression)
-    else:
-        logger.debug("No columns found in expression; skipping null check wrapping.")
-    return expression
-
-
-def check_required(data: pl.DataFrame, expression: pl.Expr) -> bool:
+def _check_required(data: pl.DataFrame, expression: pl.Expr) -> bool:
     """
     Checks if all columns required by the expression are present in the DataFrame.
     Returns True if all required columns are present, False otherwise.
@@ -53,21 +14,10 @@ def check_required(data: pl.DataFrame, expression: pl.Expr) -> bool:
     return all(col in data.columns for col in required)
 
 
-def to_bdf(data: pl.DataFrame) -> pl.DataFrame:
+def _0760_main_24(data: pl.DataFrame) -> pl.DataFrame:
     """
-    Convert column names to BDF format using the _BDF_MAPPING dictionary. If a column name is not found in the mapping, it will remain unchanged.
+    Transform the main data for version 0760-24.
     """
-    return data.rename(_BDF_MAPPING, strict=False)
-
-
-def _transform_24(data: pl.DataFrame) -> pl.DataFrame:
-    """
-    Transform in three steps:
-    1. Calculate the absolute value of cur_step_range and store it in a new column d_cur_step_range.
-    2. Create new columns for current_scale, capchg_scale, capdchg_scale, engchg_scale, and engdchg_scale based on the value of cur_step_range.
-    3. Apply the scaling factors to the relevant columns and drop the temporary columns.
-    """
-
     CUR_SCALE_10 = 10
     CUR_SCALE_100 = 100
     CUR_SCALE_1000 = 1000
@@ -178,18 +128,47 @@ def _transform_24(data: pl.DataFrame) -> pl.DataFrame:
     }
 
     for name, expr in expressions.items():
-        if check_required(data, expr):
+        if _check_required(data, expr):
             logger.info(f"Transforming data with {name} column")
-            data = data.with_columns(wrap_nullcheck(expr).alias(name))
+            data = data.with_columns(expr.alias(name))
         else:
             logger.info(
                 f"Skipping transformation of {name} column due to missing required columns"
             )
-
     return data
 
 
-def _transform_26(data: pl.DataFrame) -> pl.DataFrame:
+def _0760_aux_24(data: pl.DataFrame) -> pl.DataFrame:
+    """
+    Transform the auxiliary data for version 0760-24.
+    """
+    expressions = {
+        "test_tmp": pl.col("test_tmp") / 10,
+    }
+    return data.with_columns(**expressions)
+
+
+def _0800_main_24(data: pl.DataFrame) -> pl.DataFrame:
+    """
+    Transform the main data for version 0800-24.
+    """
+    return _0760_main_24(data)
+
+
+def _0800_aux_24(data: pl.DataFrame) -> pl.DataFrame:
+    """
+    Transform the auxiliary data for version 0800-24.
+    """
+    expressions = {
+        "test_tmp": pl.col("test_tmp") / 10,
+    }
+    return data.with_columns(**expressions)
+
+
+def _0800_main_26(data: pl.DataFrame) -> pl.DataFrame:
+    """
+    Transform the main data for version 0800-26.
+    """
     step_type_mapping = {
         1: "CC Charge",
         2: "CC Discharge",
@@ -223,9 +202,9 @@ def _transform_26(data: pl.DataFrame) -> pl.DataFrame:
         ),
     }
     for name, expr in expressions.items():
-        if check_required(data, expr):
+        if _check_required(data, expr):
             logger.info(f"Transforming data with {name} column")
-            data = data.with_columns(wrap_nullcheck(expr).alias(name))
+            data = data.with_columns(expr.alias(name))
         else:
             logger.info(
                 f"Skipping transformation of {name} column due to missing required columns"
@@ -233,21 +212,52 @@ def _transform_26(data: pl.DataFrame) -> pl.DataFrame:
     return data
 
 
-_TRANSFORM_MAPPING = {
-    "24": _transform_24,
-    "26": _transform_26,
+def _0800_aux_26(data: pl.DataFrame) -> pl.DataFrame:
+    """
+    Transform the auxiliary data for version 0800-26.
+    """
+    expressions = {
+        "test_tmp": pl.col("test_tmp") / 10,
+    }
+    return data.with_columns(**expressions)
+
+
+MAIN_TRANSFORMATIONS = {
+    "0760-24": _0760_main_24,
+    "0800-24": _0800_main_24,
+    "0800-26": _0800_main_26,
+}
+
+AUX_TRANSFORMATIONS = {
+    "0760-24": _0760_aux_24,
+    "0800-24": _0800_aux_24,
+    "0800-26": _0800_aux_26,
 }
 
 
-def transform(data, test: dict) -> pl.DataFrame:
-    dev_uid = test.get("dev_uid")
-    dev_type = str(dev_uid)[0:2]
-    if dev_type not in _TRANSFORM_MAPPING:
-        raise ValueError(f"Unsupported device type: {dev_type}")
-    return _TRANSFORM_MAPPING[dev_type](data)
+def transform_main(data: pl.DataFrame, version: str, dev_uid: int) -> pl.DataFrame:
+    """
+    Transform the main data based on the version and device UID.
+    """
+    dev_type = str(dev_uid)[:2]
+    key = f"{version}-{dev_type}"
+    if key not in MAIN_TRANSFORMATIONS:
+        raise ValueError(f"Unsupported version-device combination: {key}")
+    return MAIN_TRANSFORMATIONS[key](data)
 
 
-def enrich(data: pl.DataFrame) -> pl.DataFrame:
+def transform_aux(data: pl.DataFrame, version: str, dev_uid: int) -> pl.DataFrame:
+    """
+    Transform the auxiliary data based on the version and device UID.
+    """
+    dev_type = str(dev_uid)[:2]
+    key = f"{version}-{dev_type}"
+    if key not in AUX_TRANSFORMATIONS:
+        raise ValueError(f"Unsupported version-device combination: {key}")
+    return AUX_TRANSFORMATIONS[key](data)
+
+
+def extend_data(data: pl.DataFrame) -> pl.DataFrame:
     """
     Calculates additional columns based on existing data, such as power, step count, step index, and Unix time.
     It's advised to only enrich full datasets, as the step count and step index calculations rely on the entire dataset to be accurate.
@@ -260,9 +270,9 @@ def enrich(data: pl.DataFrame) -> pl.DataFrame:
         "test_totaltime": (pl.col("unix_time") - pl.col("unix_time").min()),
     }
     for name, expr in expressions.items():
-        if check_required(data, expr):
+        if _check_required(data, expr):
             logger.info(f"Enriching data with {name} column")
-            data = data.with_columns(wrap_nullcheck(expr).alias(name))
+            data = data.with_columns(expr.alias(name))
         else:
             logger.info(
                 f"Skipping enrichment of {name} column due to missing required columns"

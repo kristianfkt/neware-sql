@@ -111,7 +111,7 @@ class Connector:
 
     def get_table_schema(self, table: str) -> dict[str, type]:
         """
-        Get the schema of a table from the database.
+        Get the schema of a table from the database as a dictionary mapping of column names to Python types.
         """
         _t = self.wrap_table(table)
         pytypes: dict[type[sa.types.TypeEngine], type] = {
@@ -138,12 +138,14 @@ class Connector:
     ) -> sa.Selectable:
         """
         Select a table from the database, optionally filtering by columns and where conditions.
-        where supports:
-        - equality: {"col": value}
-        - range: {"col": (min, max)} where min or max can be None
-            (min, max) is inclusive
-            (min, None) is equivalent to >= min
-            (None, max) is equivalent to <= max
+
+        where [str, condition]
+
+            - equality: {col: value}
+            - between: {col: (min, max)} inclusive
+            - bigger than: {col: (min, None)} inclusive
+            - smaller than: {col: (None, max)} inclusive
+            - in list: {col: [value1, value2, ...]}
         """
 
         if isinstance(table, str):
@@ -170,6 +172,8 @@ class Connector:
                         masks.append(table.c[col] <= hi)
                     else:
                         masks.append(table.c[col].between(lo, hi))
+                elif isinstance(pred, list):
+                    masks.append(table.c[col].in_(pred))
                 else:
                     masks.append(table.c[col] == pred)
             stmt = stmt.where(sa.and_(*masks))
@@ -349,6 +353,12 @@ class Connector:
         query: str | sa.TextClause | sa.Selectable,
         schema: dict | None = None,
     ) -> pl.DataFrame:
+        """
+        Execute a query and return the results as a Polars DataFrame.
+        explicit schema may be provided to override the inferred schema
+        implements pl.read_database
+        """
+
         with self._engine.connect() as conn:
             return pl.read_database(query, conn, schema_overrides=schema)
 
@@ -358,6 +368,12 @@ class Connector:
         schema: dict | None = None,
         chunksize: int = 100000,
     ) -> Generator[pl.DataFrame, None, None]:
+        """
+        Execute a query and stream the results as Polars DataFrames in chunks.
+        explicit schema may be provided to override the inferred schema
+        implements pl.read_database
+
+        """
         with self._engine.connect().execution_options(
             stream_results=True, yield_per=chunksize
         ) as conn:
@@ -482,14 +498,16 @@ class Connector:
 
 class Version0760Connector(Connector):
     def get_tests(self) -> pl.DataFrame:
-        test = self.query("SELECT * FROM test")
-        h_test = self.query("SELECT * FROM h_test")
-        test_note = self.query("SELECT * FROM test_note")
-        return (
+        test = self.get_table("test")
+        h_test = self.get_table("h_test")
+        test_note = self.get_table("test_note")
+        tests = (
             pl.concat([test, h_test], how="diagonal_relaxed")
             .join(test_note, on=["dev_uid", "unit_id", "chl_id", "test_id"], how="left")
             .sort("dev_uid", "unit_id", "chl_id", "test_id")
         )
+
+        return tests
 
 
 class Version0800Connector(Connector):
@@ -498,10 +516,12 @@ class Version0800Connector(Connector):
             "test",
             *sorted(t for t in self.tables if t.startswith("h_test")),
         ]
-        return pl.concat(
-            [self.query(f"SELECT * FROM {table}") for table in tables],
+        tests = pl.concat(
+            [self.get_table(table) for table in tables],
             how="diagonal_relaxed",
         ).sort("dev_uid", "unit_id", "chl_id", "test_id")
+
+        return tests
 
 
 CONNECTORS = {
