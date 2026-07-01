@@ -3,6 +3,16 @@ Read data directly from the MySQL database.
 I'm setting version to `0.1.0`, with all that entails. 
 
 # Quick start
+Connecting the the MySQL database required
+  - host
+  - port
+  - user
+  - password
+  - database
+newaresql uses sqlalchemy, and will look for credentials in `os.getenv(f'BTA_{key.upper()'})` if not explicitly provided. 
+
+
+
 The connector class pulls the raw data. It must be transformed to be usefull. Data can also be extended to include columns such as `step_count`, and renamed according to the Battery Data Format (bdf) 
 ```
 import newaresql as neware
