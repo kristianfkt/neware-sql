@@ -12,10 +12,34 @@ Connecting the the MySQL database requires
 
 The actual connection is handled by an sqlalchemy engine. Credentials must be provided explicitly, or made availalbe through `os.getenv(f'BTS_{cred.upper()'})`. 
 
-
-
-
 The connector class pulls the raw data. It must be transformed to be usefull. Data can also be extended to include columns such as `step_count`, and renamed according to the Battery Data Format (bdf) 
+## Pre check
+You need
+- host: Probably 192.168.X.X
+- port: Probably 3306
+- user: ...
+- password ...
+- database: Probably bts63
+
+``` 
+from newaresql.connect import Connector
+
+with Connector(host=.., port=..., user=..., password=..., database=...,) as conn:
+  try:
+      ver = conn.version
+      print(f"Build version {ver} is running on the database")
+  except Exception as e:
+      print(f"Faile to get build version with error {e}")
+
+  try:
+      tables = conn.tables
+      print(f"Found the following {len(tables)} tables in the database:")
+      print("\n".join(tables))
+  except Exception as e:
+      print(f"Faile to fetch list of table names with error {e}")
+```
+
+## Simple example
 ```
 import newaresql as neware
 
