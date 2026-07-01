@@ -77,3 +77,4 @@ Conversion between Neware column names and BDF labels and machine codes are impl
 - Figure out automatic versioning or something. 
 - Generate documentation. 
 - Complete docstrings. 
+- Add a clone-submodule where polars writes each test to files. Support parquet, csv, feather/ipc and ndjson. 
