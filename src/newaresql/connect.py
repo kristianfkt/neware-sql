@@ -1,5 +1,6 @@
 import datetime
 import logging
+import os
 from typing import Generator, Sequence
 
 import polars as pl
@@ -13,13 +14,28 @@ logger = logging.getLogger(__name__)
 class Connector:
     def __init__(
         self,
-        *,
-        host: str,
-        port: int,
-        user: str,
-        password: str,
-        database: str,
+        host: str | None = None,
+        port: int | None = None,
+        user: str | None = None,
+        password: str | None = None,
+        database: str | None = None,
     ):
+
+        if host is None:
+            host = os.getenv("BTS_HOST")
+        if port is None:
+            port = int(os.getenv("BTS_PORT", 3306))
+        if user is None:
+            user = os.getenv("BTS_USER")
+        if password is None:
+            password = os.getenv("BTS_PASSWORD")
+        if database is None:
+            database = os.getenv("BTS_DATABASE")
+
+        if (host is None) or (user is None) or (password is None) or (database is None):
+            raise ValueError(
+                "host, user, password, and database must be provided either as arguments or as environment variables"
+            )
 
         self._host = host
         self._port = port
@@ -531,12 +547,11 @@ CONNECTORS = {
 
 
 def connect(
-    *,
-    host: str,
-    port: int,
-    user: str,
-    password: str,
-    database: str,
+    host: str | None = None,
+    port: int | None = None,
+    user: str | None = None,
+    password: str | None = None,
+    database: str | None = None,
 ) -> Connector:
 
     with Connector(
