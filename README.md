@@ -74,3 +74,6 @@ Conversion between Neware column names and BDF labels and machine codes are impl
 - For step aggregation: Map out column/variable categories, *i.e.* "Current / A" is data column, while 'Step Type / 1' is of some other category.
   - This can be added to the BDF Field level. 
 - Add test-statistics summary to the connector class, i.e. min/max seq_id, cycle, *etc*.
+- Figure out automatic versioning or something. 
+- Generate documentation. 
+- Complete docstrings. 
