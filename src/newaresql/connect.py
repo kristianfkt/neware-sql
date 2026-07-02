@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 import datetime
 import logging
 import os
-from typing import Generator, Sequence
+from typing import Generator, Literal, Sequence, overload
 
 import polars as pl
 import sqlalchemy as sa
@@ -11,44 +13,53 @@ from newaresql.schemas import get_data_schema
 logger = logging.getLogger(__name__)
 
 
+class MissingCredentialError(Exception):
+    pass
+
+
+@overload
+def _get_credential(
+    value: str | None, key: Literal["host", "user", "password", "database"]
+) -> str: ...
+
+
+@overload
+def _get_credential(value: int | str | None, key: Literal["port"]) -> int: ...
+
+
+def _get_credential(value: str | int | None, key: str) -> str | int:
+    if value is None:
+        value = os.getenv(f"BTS_{key.upper()}")
+    if value is None:
+        raise MissingCredentialError(f"Missing credential for {key}")
+    if isinstance(value, str) and (key == "port"):
+        value = int(value)
+    return value
+
+
 class Connector:
     def __init__(
         self,
         host: str | None = None,
-        port: int | None = None,
+        port: int | str | None = None,
         user: str | None = None,
         password: str | None = None,
         database: str | None = None,
     ):
 
-        if host is None:
-            host = os.getenv("BTS_HOST")
-        if port is None:
-            port = int(os.getenv("BTS_PORT", 3306))
-        if user is None:
-            user = os.getenv("BTS_USER")
-        if password is None:
-            password = os.getenv("BTS_PASSWORD")
-        if database is None:
-            database = os.getenv("BTS_DATABASE")
+        self._host = _get_credential(host, "host")
+        self._port = _get_credential(port, "port")
+        self._user = _get_credential(user, "user")
+        self._password = _get_credential(password, "password")
+        self._database = _get_credential(database, "database")
 
-        if (host is None) or (user is None) or (password is None) or (database is None):
-            raise ValueError(
-                "host, user, password, and database must be provided either as arguments or as environment variables"
-            )
-
-        self._host = host
-        self._port = port
-        self._user = user
-        self._password = password
-        self._database = database
         self._url = sa.URL.create(
             drivername="mysql+pymysql",
-            username=user,
-            password=password,
-            host=host,
-            port=port,
-            database=database,
+            username=self._user,
+            password=self._password,
+            host=self._host,
+            port=self._port,
+            database=self._database,
         )
         self._engine = sa.create_engine(self._url)
         return
@@ -548,7 +559,7 @@ CONNECTORS = {
 
 def connect(
     host: str | None = None,
-    port: int | None = None,
+    port: int | str | None = None,
     user: str | None = None,
     password: str | None = None,
     database: str | None = None,

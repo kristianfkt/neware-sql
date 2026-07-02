@@ -50,14 +50,14 @@ def _get_data(
 
 def list_tests(
     connector: Connector | None = None,
-    credentials: dict | None = None,
+    credentials: dict[str, str | int | None] | None = None,
 ) -> list[dict]:
     """
     List all availalbe tests as dictionaries
     """
     if connector is None:
         cred = credentials or {}
-        with connect(**cred) as conn:
+        with connect(**cred) as conn:  # ty:ignore[invalid-argument-type]
             return _list_tests(connector=conn)
 
     return _list_tests(connector=connector)
@@ -66,15 +66,19 @@ def list_tests(
 def get_data(
     test: dict,
     connector: Connector | None = None,
-    credentials: dict | None = None,
+    credentials: dict[str, str | int | None] | None = None,
     where: dict | None = None,
     main_columns: list[str] | None = None,
     aux_columns: list[str] | None = None,
 ):
+    """
+
+    Get data for a given test as a polars dataframe
+    """
 
     if connector is None:
         cred = credentials or {}
-        with connect(**cred) as conn:
+        with connect(**cred) as conn:  # ty:ignore[invalid-argument-type]
             return _get_data(
                 test,
                 connector=conn,
