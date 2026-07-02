@@ -3,6 +3,7 @@ Read data directly from the MySQL database.
 This first version is set at `0.1.0`.  
 
 # Quick start
+The package is not yet in PyPi, so you'll need to clone the repository and pip install it from source. 
 Connecting the the MySQL database requires
   - host
   - port
