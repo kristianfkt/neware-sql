@@ -11,23 +11,16 @@ Connecting the the MySQL database requires
   - password
   - database
 
-The actual connection is handled by an sqlalchemy engine. Credentials must be provided explicitly, or made availalbe through `os.getenv(f'BTS_{cred.upper()'})`. 
+The actual connection is handled by an SQLAlchemy engine.
+Credentials must be provided explicitly, or made available through `os.getenv(f'BTS_{cred.upper()}')`. 
 
-The connector class pulls the raw data. It must be transformed to be usefull. Data can also be extended to include columns such as `step_count`, and renamed according to the Battery Data Format (bdf) 
 ## Pre check
-You need
-- host: Probably 192.168.X.X
-- port: Probably 3306
-- user: ...
-- password ...
-- database: Probably bts63
-
 ``` 
 from newaresql.connect import Connector
 
-with Connector(host=.., port=..., user=..., password=..., database=...,) as conn:
+with Connector(host=.., port=..., user=..., password=..., database=...,) as connector:
   try:
-      ver = conn.version
+      ver = connector.version
       print(f"Build version {ver} is running on the database")
   except Exception as e:
       print(f"Faile to get build version with error {e}")
@@ -42,44 +35,39 @@ with Connector(host=.., port=..., user=..., password=..., database=...,) as conn
 
 ## Simple example
 ```
-import newaresql as neware
+import newaresql
 
-credentials = dict(
-  host:str = ...,
-  port:int = ...,    
-  user:str = ...,
-  password:str = ...,
-  database:str =...,  
-)
-with newaresql.connect(**credentials): as connection:
-    tests = neware.list_tests(connection=connection)
-    data = neware.get_data(tests[0], connection=connection)
+with newaresql.connect(host=.., port=..., user=..., password=..., database=...,): as connection:
+    tests = newaresql.list_tests(connection=connection)
+    data = newaresql.get_data(tests[0], connection=connection)
 ```
 
-or
+or, if you don't like context managers
 
 ```
 import newaresql as neware
 
-credentials = dict(
-  host:str = ...,
-  port:int = ...,     
-  user:str = ...,
-  password:str = ...,
-  database:str =...,  
-)
 
-tests = neware.list_tests(credentials=credentials)
-data = neware.get_data(tests[0], credentials=credentials)
+
+tests = neware.list_tests(credentials=dict(host=.., port=..., user=..., password=..., database=...,))
+data = neware.get_data(tests[0], credentials=dict(host=.., port=..., user=..., password=..., database=...,))
 ```
 
-or
+or, if credentials are set at enviroment variables
 
 ```
 import newaresql as neware
 
 tests = neware.list_tests()
 data = neware.get_data(tests[0])
+```
+
+```
+import newaresql
+
+with newaresql.connect(): as connection:
+    tests = newaresql.list_tests(connection=connection)
+    data = newaresql.get_data(tests[0], connection=connection)
 ```
 # Contributions needed
 - BTS build versions and device types. `newaresql` currently supports BTS build 0760 (device type 24) and 0800 (device type 24 and 26). 
