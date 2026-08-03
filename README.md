@@ -1,9 +1,8 @@
 # Neware SQL
 Read data directly from the MySQL database. 
-This first version is set at `0.1.0`.  
 
 # Quick start
-The package is not yet in PyPi, so you'll need to clone the repository and pip install it from source. 
+The package is not yet in PyPi, so you will need to clone the repository and pip install it from source. \
 Connecting the the MySQL database requires
   - host
   - port
@@ -12,13 +11,16 @@ Connecting the the MySQL database requires
   - database
 
 The actual connection is handled by an SQLAlchemy engine.
-Credentials must be provided explicitly, or made available through `os.getenv(f'BTS_{cred.upper()}')`. 
+Credentials must be provided explicitly, or made availabe as enviroment variables on the form `BTS_HOST`, `BTS_PORT`, *etc*.  
 
-## Pre check
+## Pre-check
+To confirm that everything works as intended, the code block below will establish connection, check BTS build version and list the number of tables in the database. 
 ``` 
-from newaresql.connect import Connector
+import newaresql.connect
 
-with Connector(host=.., port=..., user=..., password=..., database=...,) as connector:
+credentials = dict(host=..., port=..., user=..., password=..., database=...)
+
+with newaresql.connect.Connector(**credentials) as connector:
   try:
       ver = connector.version
       print(f"Build version {ver} is running on the database")
@@ -28,51 +30,37 @@ with Connector(host=.., port=..., user=..., password=..., database=...,) as conn
   try:
       tables = conn.tables
       print(f"Found the following {len(tables)} tables in the database:")
-      print("\n".join(tables))
   except Exception as e:
       print(f"Faile to fetch list of table names with error {e}")
 ```
 
 ## Simple example
-```
-import newaresql
-
-with newaresql.connect(host=.., port=..., user=..., password=..., database=...,): as connection:
-    tests = newaresql.list_tests(connection=connection)
-    data = newaresql.get_data(tests[0], connection=connection)
-```
-
-or, if you don't like context managers
-
-```
-import newaresql as neware
-
-
-
-tests = neware.list_tests(credentials=dict(host=.., port=..., user=..., password=..., database=...,))
-data = neware.get_data(tests[0], credentials=dict(host=.., port=..., user=..., password=..., database=...,))
-```
-
-or, if credentials are set at enviroment variables
-
-```
-import newaresql as neware
-
-tests = neware.list_tests()
-data = neware.get_data(tests[0])
-```
+The preffered way is the establish a re-useable connection ... 
 
 ```
 import newaresql
 
-with newaresql.connect(): as connection:
+credentials = dict(host=..., port=..., user=..., password=..., database=...)
+
+with newaresql.connect(**credentials): as connection:
     tests = newaresql.list_tests(connection=connection)
     data = newaresql.get_data(tests[0], connection=connection)
 ```
+
+but credentials can also be used-directly
+```
+import newaresql
+
+credentials = dict(host=..., port=..., user=..., password=..., database=...)
+
+tests = newaresql.list_tests(credentials=credentials)
+data = newaresql.get_data(tests[0], credentials=credentials)
+```
+
 # Contributions needed
 - BTS build versions and device types. `newaresql` currently supports BTS build 0760 (device type 24) and 0800 (device type 24 and 26). 
 - Testing. Does it work for you? 
-- 
+  
 # Code layout
 Database connectivity is implemented in `connect.py`, using SQLAlchemy's connection engine and `polars.read_database` to execute most queries.\
 In our experience, main- and auxillary data merge can be *excessively*  slow on the server side.\
@@ -91,3 +79,4 @@ Conversion between Neware column names and BDF labels and machine codes are impl
 - Generate documentation. 
 - Complete docstrings. 
 - Add a clone-submodule where polars writes each test to files. Support parquet, csv, feather/ipc and ndjson. 
+- Add a Test class for convenience. 
