@@ -14,6 +14,13 @@ def _check_required(data: pl.DataFrame, expression: pl.Expr) -> bool:
     return all(col in data.columns for col in required)
 
 
+def _get_required(expression: pl.Expr) -> set[str]:
+    """
+    Returns a set of required column names for the given expression.
+    """
+    return set(expression.meta.root_names())
+
+
 def _0760_main_24(data: pl.DataFrame) -> pl.DataFrame:
     """
     Transform the main data for version 0760-24.

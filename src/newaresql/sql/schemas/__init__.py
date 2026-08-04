@@ -1,8 +1,9 @@
 import logging
 
-from newaresql.schemas import schemas_0760, schemas_0800
+from newaresql.sql.schemas import schemas_0760, schemas_0800
 
 logger = logging.getLogger(__name__)
+
 _SCHEMAS: dict[str, dict[str, dict[str, type]]] = {
     "0760-24": {"main": schemas_0760.main_24, "aux": schemas_0760.aux_24},
     "0800-24": {"main": schemas_0800.main_24, "aux": schemas_0800.aux_24},
