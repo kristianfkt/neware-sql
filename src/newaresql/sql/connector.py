@@ -1,62 +1,45 @@
 from __future__ import annotations
 
-import datetime
 import logging
-import os
 from typing import Generator, Literal, Sequence, overload
 
 import polars as pl
 import sqlalchemy as sa
 
+import newaresql.utils as utils
 from newaresql.schemas import get_data_schema
+from newaresql.sql.types import to_pytype
 
 logger = logging.getLogger(__name__)
 
 
-class MissingCredentialError(Exception):
-    pass
-
-
-_PYTYPES: dict[type[sa.types.TypeEngine], type] = {
-    sa.types.Integer: int,
-    sa.types.Float: float,
-    sa.types.Numeric: float,
-    sa.types.String: str,
-    sa.types.Text: str,
-    sa.types.DateTime: datetime.datetime,
-    sa.types.Date: datetime.date,
-    sa.types.Boolean: bool,
-}
-
-_CHUNKSIZE: int = int(1e5)  # default chunk size for streaming queries
-
-
 @overload
-def _get_credential(
-    value: str | None, key: Literal["host", "user", "password", "database"]
+def get_config(
+    key: Literal["host", "user", "password", "database"],
+    value: str | None = None,
+    default: str | None = None,
 ) -> str: ...
 
 
 @overload
-def _get_credential(value: int | str | None, key: Literal["port"]) -> int: ...
+def get_config(
+    key: Literal["port", "chunksize"],
+    value: int | str | None = None,
+    default: int | None = None,
+) -> int: ...
 
 
-def _get_credential(value: str | int | None, key: str) -> str | int:
-    if value is None:
-        value = os.getenv(f"BTS_{key.upper()}")
-    if value is None:
-        raise MissingCredentialError(f"Missing credential for {key}")
-    if isinstance(value, str) and (key == "port"):
+def get_config(
+    key: Literal["host", "user", "password", "database", "port", "chunksize"],
+    value: str | int | None = None,
+    default: str | int | None = None,
+) -> str | int:
+
+    # Fetch as standard config value, then convert to int if necessary
+    value = utils.get_config(key, value=value, default=default)
+    if isinstance(value, str) and (key in ["port", "chunksize"]):
         value = int(value)
     return value
-
-
-def _to_pytype(sqltype: sa.types.TypeEngine) -> type:
-    """
-    Convert a SQLAlchemy type to a Python type.
-    """
-
-    return _PYTYPES.get(sqltype._type_affinity, object)
 
 
 class Connector:
@@ -67,13 +50,15 @@ class Connector:
         user: str | None = None,
         password: str | None = None,
         database: str | None = None,
+        chunksize: int | None = None,
     ):
 
-        self._host = _get_credential(host, "host")
-        self._port = _get_credential(port, "port")
-        self._user = _get_credential(user, "user")
-        self._password = _get_credential(password, "password")
-        self._database = _get_credential(database, "database")
+        self._host = get_config("host", value=host)
+        self._port = get_config("port", value=port, default=3306)
+        self._user = get_config("user", value=user)
+        self._password = get_config("password", value=password)
+        self._database = get_config("database", value=database)
+        self._chunksize = get_config("chunksize", value=chunksize, default=int(1e5))
 
         self._url = sa.URL.create(
             drivername="mysql+pymysql",
@@ -101,6 +86,10 @@ class Connector:
     @property
     def database(self) -> str:
         return self._database
+
+    @property
+    def chunksize(self) -> int:
+        return self._chunksize
 
     @property
     def engine(self) -> sa.engine.Engine:
@@ -165,7 +154,7 @@ class Connector:
         """
         _t = self.wrap_table(table)
 
-        return {col.name: _to_pytype(col.type) for col in _t.columns}
+        return {col.name: to_pytype(col.type) for col in _t.columns}
 
     def select_table(
         self,
@@ -403,7 +392,6 @@ class Connector:
         self,
         query: str | sa.TextClause | sa.Selectable,
         schema: dict | None = None,
-        chunksize: int = _CHUNKSIZE,
     ) -> Generator[pl.DataFrame, None, None]:
         """
         Execute a query and stream the results as Polars DataFrames in chunks.
@@ -412,13 +400,13 @@ class Connector:
 
         """
         with self._engine.connect().execution_options(
-            stream_results=True, yield_per=chunksize
+            stream_results=True, yield_per=self.chunksize
         ) as conn:
             yield from pl.read_database(
                 query,
                 conn,
                 iter_batches=True,
-                batch_size=chunksize,
+                batch_size=self.chunksize,
                 schema_overrides=schema,
             )
 
@@ -439,13 +427,12 @@ class Connector:
         table: str,
         columns: str | Sequence[str] | None = None,
         where: dict | None = None,
-        chunksize: int = _CHUNKSIZE,
     ) -> Generator[pl.DataFrame, None, None]:
         """
         Stream a table from the database as a Polars DataFrame.
         """
         stmt = self.select_table(table, columns=columns, where=where)
-        yield from self.stream(stmt, chunksize=chunksize)
+        yield from self.stream(stmt)
 
     def get_main_data(
         self,
@@ -492,7 +479,6 @@ class Connector:
         test: dict,
         where: dict | None = None,
         columns: str | Sequence[str] | None = None,
-        chunksize: int = _CHUNKSIZE,
     ) -> Generator[pl.DataFrame, None, None]:
 
         stmt = self.make_main_statement(test, where=where, columns=columns)
@@ -503,14 +489,13 @@ class Connector:
         schema = get_data_schema(self.get_version(), test["dev_uid"])["main"]
         if columns is not None:
             schema = {k: v for k, v in schema.items() if k in columns}
-        yield from self.stream(stmt, chunksize=chunksize, schema=schema)
+        yield from self.stream(stmt, schema=schema)
 
     def stream_aux_data(
         self,
         test: dict,
         where: dict | None = None,
         columns: str | Sequence[str] | None = None,
-        chunksize: int = _CHUNKSIZE,
     ) -> Generator[pl.DataFrame, None, None]:
         stmt = self.make_aux_statement(test, where=where, columns=columns)
         if stmt is None:
@@ -523,7 +508,7 @@ class Connector:
         schema = get_data_schema(self.get_version(), test["dev_uid"])["aux"]
         if columns is not None:
             schema = {k: v for k, v in schema.items() if k in columns}
-        yield from self.stream(stmt, chunksize=chunksize, schema=schema)
+        yield from self.stream(stmt, schema=schema)
 
     def get_tests(self) -> pl.DataFrame:
         raise NotImplementedError("get_tests() must be implemented in subclasses")

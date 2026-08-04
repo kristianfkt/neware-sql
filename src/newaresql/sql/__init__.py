@@ -1,3 +1,5 @@
+from typing import Literal, overload
+
 import polars as pl
 
 from newaresql.sql.bdf import MAPPINGS, convert
@@ -7,7 +9,7 @@ from newaresql.sql.transform import extend_data, transform_aux, transform_main
 
 
 def _list_tests(connector: Connector) -> list[dict]:
-    return connector.get_tests().to_dicts()
+    return connector.list_tests()
 
 
 def _get_data(
@@ -16,7 +18,7 @@ def _get_data(
     where: dict | None = None,
     main_columns: list[str] | None = None,
     aux_columns: list[str] | None = None,
-):
+) -> pl.DataFrame:
 
     version = connector.get_version()
     dev_uid = test["dev_uid"]
@@ -75,6 +77,7 @@ def connect(
     user: str | None = None,
     password: str | None = None,
     database: str | None = None,
+    chunksize: int | None = None,
     version: str | None = None,
 ) -> Connector:
     """
@@ -100,19 +103,22 @@ def connect(
         user=user,
         password=password,
         database=database,
+        chunksize=chunksize,
     )
 
 
 def list_tests(
     connector: Connector | None = None,
-    credentials: dict[str, str | int | None] | None = None,
+    credentials: dict[
+        Literal["host", "port", "user", "password", "database"], str | int | None
+    ]
+    | None = None,
 ) -> list[dict]:
     """
     List all availalbe tests as dictionaries
     """
     if connector is None:
-        cred = credentials or {}
-        with connect(**cred) as conn:  # ty:ignore[invalid-argument-type]
+        with connect(**(credentials or {})) as conn:  # ty:ignore[invalid-argument-type]
             return _list_tests(connector=conn)
 
     return _list_tests(connector=connector)
@@ -121,7 +127,10 @@ def list_tests(
 def get_data(
     test: dict,
     connector: Connector | None = None,
-    credentials: dict[str, str | int | None] | None = None,
+    credentials: dict[
+        Literal["host", "port", "user", "password", "database"], str | int | None
+    ]
+    | None = None,
     where: dict | None = None,
     main_columns: list[str] | None = None,
     aux_columns: list[str] | None = None,
@@ -132,8 +141,7 @@ def get_data(
     """
 
     if connector is None:
-        cred = credentials or {}
-        with connect(**cred) as conn:  # ty:ignore[invalid-argument-type]
+        with connect(**(credentials or {})) as conn:  # ty:ignore[invalid-argument-type]
             return _get_data(
                 test,
                 connector=conn,
