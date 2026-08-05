@@ -30,6 +30,7 @@ def _clone_test(
     test: dict,
     remote: newaresql.sql.connector.Connector,
     local: newaresql.local.connector.Connector,
+    chunksize: int = int(1e5),
 ):
 
     path = local.root.joinpath(utils.test_name(test))
@@ -46,7 +47,7 @@ def _clone_test(
     else:
         max_seq_id = 0
     i = max_seq_id + 1
-    j = i + remote.chunksize - 1
+    j = i + chunksize - 1
 
     while (
         chunk := newaresql.sql.get_data(
@@ -54,8 +55,8 @@ def _clone_test(
         )
     ).height > 0:
         utils.dump_frame(chunk, path.joinpath(str(uuid.uuid4())), fmt=local.fmt)
-        i = i + remote.chunksize
-        j = i + remote.chunksize - 1
+        i = i + chunksize
+        j = i + chunksize - 1
 
     # Finally
     utils.dump_dict(test, path.joinpath("meta.json"))
@@ -71,7 +72,7 @@ def clone(
     password: str | None = None,
     database: str | None = None,
     fmt: Literal["parquet", "csv", "feather", "ipc"] | None = None,
-    chunksize: int | None = None,
+    chunksize: int = int(1e5),
     callback: Callable[..., bool] | None = None,
 ):
 
@@ -84,7 +85,6 @@ def clone(
             user=user,
             password=password,
             database=database,
-            chunksize=chunksize,
         ) as remote,
         newaresql.local.connector.Connector(
             root=root,
@@ -111,7 +111,9 @@ def clone(
             if _check_local_finished(test, local):
                 continue
 
-            futures[executor.submit(_clone_test, test, remote, local)] = test
+            futures[
+                executor.submit(_clone_test, test, remote, local, chunksize=chunksize)
+            ] = test
         for future in concurrent.futures.as_completed(futures):
             try:
                 future.result()

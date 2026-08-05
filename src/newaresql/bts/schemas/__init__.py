@@ -1,6 +1,8 @@
 import logging
 
-from newaresql.sql.schemas import schemas_0760, schemas_0800
+import polars as pl
+
+from newaresql.bts.schemas import schemas_0760, schemas_0800
 
 logger = logging.getLogger(__name__)
 

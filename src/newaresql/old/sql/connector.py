@@ -23,7 +23,7 @@ def get_config(
 
 @overload
 def get_config(
-    key: Literal["port", "chunksize"],
+    key: Literal["port"],
     value: int | str | None = None,
     default: int | None = None,
 ) -> int: ...
@@ -50,7 +50,6 @@ class Connector:
         user: str | None = None,
         password: str | None = None,
         database: str | None = None,
-        chunksize: int | None = None,
     ):
 
         self._host = get_config("host", value=host)
@@ -58,7 +57,6 @@ class Connector:
         self._user = get_config("user", value=user)
         self._password = get_config("password", value=password)
         self._database = get_config("database", value=database)
-        self._chunksize = get_config("chunksize", value=chunksize, default=int(1e5))
 
         self._url = sa.URL.create(
             drivername="mysql+pymysql",
@@ -86,10 +84,6 @@ class Connector:
     @property
     def database(self) -> str:
         return self._database
-
-    @property
-    def chunksize(self) -> int:
-        return self._chunksize
 
     @property
     def engine(self) -> sa.engine.Engine:
@@ -392,6 +386,7 @@ class Connector:
         self,
         query: str | sa.TextClause | sa.Selectable,
         schema: dict | None = None,
+        chunksize: int | None = None,
     ) -> Generator[pl.DataFrame, None, None]:
         """
         Execute a query and stream the results as Polars DataFrames in chunks.
@@ -399,14 +394,16 @@ class Connector:
         implements pl.read_database
 
         """
+        if chunksize is None:
+            chunksize = 1
         with self._engine.connect().execution_options(
-            stream_results=True, yield_per=self.chunksize
+            stream_results=True, yield_per=chunksize
         ) as conn:
             yield from pl.read_database(
                 query,
                 conn,
                 iter_batches=True,
-                batch_size=self.chunksize,
+                batch_size=chunksize,
                 schema_overrides=schema,
             )
 
@@ -427,12 +424,13 @@ class Connector:
         table: str,
         columns: str | Sequence[str] | None = None,
         where: dict | None = None,
+        chunksize: int | None = None,
     ) -> Generator[pl.DataFrame, None, None]:
         """
         Stream a table from the database as a Polars DataFrame.
         """
         stmt = self.select_table(table, columns=columns, where=where)
-        yield from self.stream(stmt)
+        yield from self.stream(stmt, chunksize=chunksize)
 
     def get_main_data(
         self,
@@ -479,6 +477,7 @@ class Connector:
         test: dict,
         where: dict | None = None,
         columns: str | Sequence[str] | None = None,
+        chunksize: int | None = None,
     ) -> Generator[pl.DataFrame, None, None]:
 
         stmt = self.make_main_statement(test, where=where, columns=columns)
@@ -489,13 +488,14 @@ class Connector:
         schema = get_data_schema(self.get_version(), test["dev_uid"])["main"]
         if columns is not None:
             schema = {k: v for k, v in schema.items() if k in columns}
-        yield from self.stream(stmt, schema=schema)
+        yield from self.stream(stmt, schema=schema, chunksize=chunksize)
 
     def stream_aux_data(
         self,
         test: dict,
         where: dict | None = None,
         columns: str | Sequence[str] | None = None,
+        chunksize: int | None = None,
     ) -> Generator[pl.DataFrame, None, None]:
         stmt = self.make_aux_statement(test, where=where, columns=columns)
         if stmt is None:
@@ -508,7 +508,7 @@ class Connector:
         schema = get_data_schema(self.get_version(), test["dev_uid"])["aux"]
         if columns is not None:
             schema = {k: v for k, v in schema.items() if k in columns}
-        yield from self.stream(stmt, schema=schema)
+        yield from self.stream(stmt, schema=schema, chunksize=chunksize)
 
     def get_tests(self) -> pl.DataFrame:
         raise NotImplementedError("get_tests() must be implemented in subclasses")

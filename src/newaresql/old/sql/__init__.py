@@ -77,7 +77,6 @@ def connect(
     user: str | None = None,
     password: str | None = None,
     database: str | None = None,
-    chunksize: int | None = None,
     version: str | None = None,
 ) -> Connector:
     """
@@ -103,7 +102,6 @@ def connect(
         user=user,
         password=password,
         database=database,
-        chunksize=chunksize,
     )
 
 
@@ -158,4 +156,4 @@ def get_data(
     )
 
 
-__all__ = ["connect", "list_tests", "get_data"]
+__all__ = ["connect", "list_tests", "get_data", "stream_data"]
