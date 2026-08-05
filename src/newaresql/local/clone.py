@@ -3,6 +3,8 @@ import pathlib
 import uuid
 from typing import Callable, Literal
 
+import polars as pl
+
 import newaresql.local.connector
 import newaresql.sql
 import newaresql.sql.connector
@@ -91,7 +93,18 @@ def clone(
         concurrent.futures.ThreadPoolExecutor() as executor,
     ):
         futures = {}
-        for test in remote.list_tests():
+
+        tests_local = pl.DataFrame(local.list_tests())
+        test_remote = pl.DataFrame(remote.list_tests())
+        tests = test_remote.join(
+            tests_local.filter(pl.col("end_time").is_not_null()).select(
+                "dev_uid", "unit_id", "chl_id", "test_id"
+            ),
+            on=["dev_uid", "unit_id", "chl_id", "test_id"],
+            how="anti",
+        )
+
+        for test in tests.to_dicts():
             if not callback(test):
                 continue
 
