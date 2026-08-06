@@ -1,17 +1,22 @@
 import logging
+from typing import overload
 
 import polars as pl
 
 logger = logging.getLogger(__name__)
 
 
-def _check_required(data: pl.DataFrame, expression: pl.Expr) -> bool:
+def _check_required(data: pl.DataFrame | pl.LazyFrame, expression: pl.Expr) -> bool:
     """
     Checks if all columns required by the expression are present in the DataFrame.
     Returns True if all required columns are present, False otherwise.
     """
+    if isinstance(data, pl.LazyFrame):
+        cols = data.collect_schema().names()
+    else:
+        cols = data.columns
     required = set(expression.meta.root_names())
-    return all(col in data.columns for col in required)
+    return all(col in cols for col in required)
 
 
 def _get_required(expression: pl.Expr) -> set[str]:
@@ -264,7 +269,13 @@ def transform_aux(data: pl.DataFrame, version: str, dev_uid: int) -> pl.DataFram
     return AUX_TRANSFORMATIONS[key](data)
 
 
-def extend_data(data: pl.DataFrame) -> pl.DataFrame:
+@overload
+def extend_data(data: pl.DataFrame) -> pl.DataFrame: ...
+@overload
+def extend_data(data: pl.LazyFrame) -> pl.LazyFrame: ...
+
+
+def extend_data(data: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame | pl.LazyFrame:
     """
     Calculates additional columns based on existing data, such as power, step count, step index, and Unix time.
     It's advised to only enrich full datasets, as the step count and step index calculations rely on the entire dataset to be accurate.

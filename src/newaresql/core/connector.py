@@ -44,7 +44,13 @@ class BaseConnector:
     def delete_table(self, table: str) -> None:
         raise NotImplementedError("delete_table() must be implemented in subclasses")
 
-    def write_table(self, data: pl.DataFrame, table: str, append: bool = True) -> None:
+    def write_table(
+        self,
+        data: pl.DataFrame,
+        table: str,
+        schema: dict[str, Any] | None = None,
+        append: bool = True,
+    ) -> None:
         raise NotImplementedError("write_table() must be implemented in subclasses")
 
     def read_table(
@@ -83,6 +89,7 @@ class BaseConnector:
         test: dict,
         columns: str | list[str] | None = None,
         where: dict[str, Any | list[Any] | tuple[Any | None, Any | None]] | None = None,
+        extend: bool = True,
     ) -> pl.DataFrame:
         raise NotImplementedError("get_data() must be implemented in subclasses")
 
@@ -91,6 +98,7 @@ class BaseConnector:
         test: dict,
         columns: str | list[str] | None = None,
         where: dict[str, Any | list[Any] | tuple[Any | None, Any | None]] | None = None,
+        extend: bool = True,
     ) -> pl.LazyFrame:
         raise NotImplementedError("scan_data() must be implemented in subclasses")
 
@@ -100,6 +108,7 @@ class BaseConnector:
         columns: str | list[str] | None = None,
         where: dict[str, Any | list[Any] | tuple[Any | None, Any | None]] | None = None,
         chunksize: int = 100_000,
+        extend: bool = True,
     ) -> Generator[pl.DataFrame, None, None]:
         raise NotImplementedError("stream_data() must be implemented in subclasses")
 
@@ -170,16 +179,22 @@ class SQLConnector(BaseConnector):
         table: str,
         columns: str | list[str] | None = None,
         where: dict[str, Any | list[Any] | tuple[Any | None, Any | None]] | None = None,
+        schema: dict[str, Any] | None = None,
     ) -> pl.DataFrame:
-        return self.get_query(make_select_query(table, columns=columns, where=where))
+        return self.get_query(
+            make_select_query(table, columns=columns, where=where), schema=schema
+        )
 
     def scan_table(
         self,
         table: str,
         columns: str | list[str] | None = None,
         where: dict[str, Any | list[Any] | tuple[Any | None, Any | None]] | None = None,
+        schema: dict[str, Any] | None = None,
     ) -> pl.LazyFrame:
-        return self.read_table(table, columns=columns, where=where).lazy()
+        return self.read_table(
+            table, columns=columns, where=where, schema=schema
+        ).lazy()
 
     def stream_table(
         self,
@@ -187,6 +202,7 @@ class SQLConnector(BaseConnector):
         columns: str | list[str] | None = None,
         where: dict[str, Any | list[Any] | tuple[Any | None, Any | None]] | None = None,
         chunksize: int = 100_000,
+        schema: dict[str, Any] | None = None,
     ) -> Generator[pl.DataFrame, None, None]:
         query = make_select_query(table, columns=columns, where=where)
-        yield from self.stream_query(query, chunksize=chunksize)
+        yield from self.stream_query(query, chunksize=chunksize, schema=schema)

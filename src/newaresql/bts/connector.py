@@ -159,26 +159,29 @@ class BTSConnector(SQLConnector):
         test: dict,
         columns: str | list[str] | None = None,
         where: dict[str, Any | list[Any] | tuple[Any | None, Any | None]] | None = None,
+        extend: bool = True,
     ) -> pl.DataFrame:
 
-        schema = get_data_schema(self.get_version(), test["dev_uid"])
-        main_columns = list(schema["main"].keys())
+        schemas = get_data_schema(self.get_version(), test["dev_uid"])
+        main_columns = list(schemas["main"].keys())
         main_columns.remove("test_tmp")
         aux_columns = ["seq_id", "auxchl_id", "test_tmp"]
 
         main = self._get_main_raw(
-            test, columns=main_columns, where=where, schema=schema["main"]
+            test, columns=main_columns, where=where, schema=schemas["main"]
         )
         aux = self._get_aux_raw(
-            test, columns=aux_columns, where=where, schema=schema["aux"]
+            test, columns=aux_columns, where=where, schema=schemas["aux"]
         )
         if (aux is not None) and (aux.height == 0):
             aux = None
 
         if main is None:
-            main = pl.DataFrame(schema=schema["main"])
+            # main = pl.DataFrame(schema=schemas["main"])
+            raise ValueError("Main data is missing")
         else:
             main = transform_main(main, self.get_version(), test["dev_uid"])
+
         if aux is not None:
             aux = transform_aux(aux, self.get_version(), test["dev_uid"])
             data = main.join(aux, on="seq_id", how="left", maintain_order="left")
@@ -187,8 +190,9 @@ class BTSConnector(SQLConnector):
                 auxchl_id=pl.lit(None).cast(pl.Int64),
                 test_tmp=pl.lit(None).cast(pl.Int64),
             )
-        data = extend_data(data)
 
+        if extend:
+            data = extend_data(data)
         return convert(data, "bts", "label")
 
     def get_stats(self, test: dict) -> dict:

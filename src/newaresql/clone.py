@@ -49,7 +49,9 @@ def _stream_chunks(
     seq_id = local.get_stats(test)["seq_id"] or 0
     i = seq_id + 1
     j = i + chunksize - 1
-    while not (chunk := remote.get_data(test, where={"seq_id": (i, j)})).is_empty():
+    while not (
+        chunk := remote.get_data(test, where={"seq_id": (i, j)}, extend=False)
+    ).is_empty():
         yield chunk
         i = j + 1
         j = i + chunksize - 1

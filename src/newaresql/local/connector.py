@@ -8,6 +8,7 @@ import polars as pl
 import sqlalchemy as sa
 
 import newaresql.core.utils as utils
+from newaresql.bts.transform import extend_data
 from newaresql.core.connector import BaseConnector, SQLConnector
 
 
@@ -56,9 +57,13 @@ class SQLiteConnector(SQLConnector):
         test: dict,
         columns: str | list[str] | None = None,
         where: dict[str, Any | list[Any] | tuple[Any | None, Any | None]] | None = None,
+        extend: bool = True,
     ) -> pl.DataFrame:
         name = utils.test_name(test)
-        return self.read_table(name, columns=columns, where=where)
+        data = self.read_table(name, columns=columns, where=where)
+        if extend:
+            data = extend_data(data)
+        return data.sort("Aux Channel ID / 1", "Test Time / s")
 
     def stream_data(
         self,
@@ -66,20 +71,23 @@ class SQLiteConnector(SQLConnector):
         columns: str | list[str] | None = None,
         where: dict[str, Any | list[Any] | tuple[Any | None, Any | None]] | None = None,
         chunksize: int = 100_000,
+        extend: bool = True,
     ) -> Generator[pl.DataFrame, None, None]:
-        name = utils.test_name(test)
-        yield from self.stream_table(
-            name, columns=columns, where=where, chunksize=chunksize
-        )
+        lazy = self.scan_data(test, columns=columns, where=where, extend=extend)
+        yield from lazy.collect_batches(chunk_size=chunksize, maintain_order=True)
 
     def scan_data(
         self,
         test: dict,
         columns: str | list[str] | None = None,
         where: dict[str, Any | list[Any] | tuple[Any | None, Any | None]] | None = None,
+        extend: bool = True,
     ) -> pl.LazyFrame:
         name = utils.test_name(test)
-        return self.scan_table(name, columns=columns, where=where)
+        data = self.scan_table(name, columns=columns, where=where)
+        if extend:
+            data = extend_data(data)
+        return data
 
     def get_stats(self, test: dict) -> dict:
         stats = {}
@@ -155,6 +163,7 @@ class FileConnector(BaseConnector):
         table: str,
         columns: str | list[str] | None = None,
         where: dict[str, Any | list[Any] | tuple[Any | None, Any | None]] | None = None,
+        schema: dict[str, Any] | None = None,
     ) -> pl.LazyFrame:
         path = self.path.joinpath(table)
         lazy = utils.SCAN[self.format](path.joinpath(f"*.{self.format}"))
@@ -192,18 +201,26 @@ class FileConnector(BaseConnector):
         test: dict,
         columns: str | list[str] | None = None,
         where: dict[str, Any | list[Any] | tuple[Any | None, Any | None]] | None = None,
+        extend: bool = True,
     ) -> pl.DataFrame:
         table = utils.test_name(test)
-        return self.read_table(table, columns=columns, where=where)
+        data = self.read_table(table, columns=columns, where=where)
+        if extend:
+            data = extend_data(data)
+        return data
 
     def scan_data(
         self,
         test: dict,
         columns: str | list[str] | None = None,
         where: dict[str, Any | list[Any] | tuple[Any | None, Any | None]] | None = None,
+        extend: bool = True,
     ) -> pl.LazyFrame:
         table = utils.test_name(test)
-        return self.scan_table(table, columns=columns, where=where)
+        data = self.scan_table(table, columns=columns, where=where)
+        if extend:
+            data = extend_data(data)
+        return data
 
     def stream_data(
         self,
@@ -211,8 +228,9 @@ class FileConnector(BaseConnector):
         columns: str | list[str] | None = None,
         where: dict[str, Any | list[Any] | tuple[Any | None, Any | None]] | None = None,
         chunksize: int = 100_000,
+        extend: bool = True,
     ) -> Generator[pl.DataFrame, None, None]:
-        lazy = self.scan_data(test, columns=columns, where=where)
+        lazy = self.scan_data(test, columns=columns, where=where, extend=extend)
         yield from lazy.collect_batches(chunk_size=chunksize, maintain_order=True)
 
     def get_stats(self, test: dict) -> dict:
