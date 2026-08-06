@@ -6,13 +6,17 @@ import polars as pl
 
 logger = logging.getLogger(__name__)
 
+# ==============
+# We could probably autogenerate these fields from a json file or something
+# ==============
 
-@dataclass
+
+@dataclass(frozen=True, unsafe_hash=True)
 class Field:
     """
-    Mapping of a column in the database to its label and code representation.
+    Mapping of a column in a bts database to its label and code representation.
     Attributes:
-        neware (str): The name of the column in the Neware database.
+        bts (str): The name of the column in the BTS database.
         label (str): The human-readable label for the column.
         code (str): The code representation for the column.
     """
@@ -22,24 +26,38 @@ class Field:
     code: str
 
 
-FIELDS = [
-    # Counters and indexes
+DATA_FIELDS = []
+STEP_FIELDS = []
+
+# Counters and indexes
+DATA_FIELDS += [
     Field(bts="step_id", label="Step ID / 1", code="step_id"),
     Field(bts="step_type", label="Step Type / 1", code="step_type"),
     Field(bts="step_index", label="Step Index / 1", code="step_index"),
     Field(bts="seq_id", label="Record Count / 1", code="record_count"),
     Field(bts="step_count", label="Step Count / 1", code="step_count"),
     Field(bts="cycle", label="Cycle Count / 1", code="cycle_count"),
-    # Time data
+    Field(bts="auxchl_id", label="Aux Channel ID / 1", code="aux_channel_id"),
+]
+
+# Time
+DATA_FIELDS += [
     Field(bts="unix_time", label="Unix Time / s", code="unix_time"),
     Field(bts="test_atime", label="Time / datetime", code="time_datetime"),
     Field(bts="test_time", label="Step Time / s", code="step_time"),
-    # Timeseries data
+    Field(bts="test_totaltime", label="Test Time / s", code="total_time"),
+]
+
+# Timeseries data
+DATA_FIELDS += [
     Field(bts="test_vol", label="Voltage / V", code="voltage_volt"),
     Field(bts="test_cur", label="Current / A", code="current_ampere"),
     Field(bts="test_tmp", label="Temperature / degC", code="temperature_celsius"),
     Field(bts="test_pow", label="Power / W", code="power_watt"),
-    # Integral data
+]
+
+# Integral data
+DATA_FIELDS += [
     Field(
         bts="test_capchg",
         label="Step Charging Capacity / Ah",
@@ -71,6 +89,8 @@ FIELDS = [
         code="step_energy_wh",
     ),
 ]
+
+FIELDS = list(set(DATA_FIELDS + STEP_FIELDS))
 
 MAPPINGS = {
     (src, dst): {getattr(field, src): getattr(field, dst) for field in FIELDS}

@@ -26,19 +26,26 @@ class BaseConnector:
     def __exit__(self, exc_type, exc_value, traceback) -> None:
         return
 
-    def get_query(self, query: str) -> pl.DataFrame:
+    def get_query(
+        self,
+        query: str,
+        schema: dict[str, Any] | None = None,
+    ) -> pl.DataFrame:
         raise NotImplementedError("get_query() must be implemented in subclasses")
 
     def stream_query(
-        self, query: str, chunksize: int = 100_000
+        self,
+        query: str,
+        chunksize: int = 100_000,
+        schema: dict[str, Any] | None = None,
     ) -> Generator[pl.DataFrame, None, None]:
         raise NotImplementedError("stream_query() must be implemented in subclasses")
 
-    def write_table(self, data: pl.DataFrame, table: str, append: bool = True) -> None:
-        raise NotImplementedError("write_table() must be implemented in subclasses")
-
     def delete_table(self, table: str) -> None:
         raise NotImplementedError("delete_table() must be implemented in subclasses")
+
+    def write_table(self, data: pl.DataFrame, table: str, append: bool = True) -> None:
+        raise NotImplementedError("write_table() must be implemented in subclasses")
 
     def read_table(
         self,
@@ -96,6 +103,9 @@ class BaseConnector:
     ) -> Generator[pl.DataFrame, None, None]:
         raise NotImplementedError("stream_data() must be implemented in subclasses")
 
+    def get_stats(self, test: dict) -> dict:
+        raise NotImplementedError("get_stats() must be implemented in subclasses")
+
 
 class SQLConnector(BaseConnector):
     def __init__(
@@ -131,20 +141,28 @@ class SQLConnector(BaseConnector):
     def get_query(
         self,
         query: str,
+        schema: dict[str, Any] | None = None,
     ) -> pl.DataFrame:
+        schema = pl.Schema(schema) if schema is not None else None
         with self._engine.connect() as conn:
-            return pl.read_database(query, conn)
+            return pl.read_database(query, conn, schema_overrides=schema)
 
     def stream_query(
         self,
         query: str,
         chunksize: int = 100_000,
+        schema: dict[str, Any] | None = None,
     ) -> Generator[pl.DataFrame, None, None]:
+        schema = pl.Schema(schema) if schema is not None else None
         with self._engine.connect().execution_options(
             stream_results=True, yield_per=chunksize
         ) as conn:
             yield from pl.read_database(
-                query, conn, iter_batches=True, batch_size=chunksize
+                query,
+                conn,
+                iter_batches=True,
+                batch_size=chunksize,
+                schema_overrides=schema,
             )
 
     def read_table(

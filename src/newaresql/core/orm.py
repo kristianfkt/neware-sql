@@ -1,4 +1,5 @@
 import datetime
+from typing import Any
 
 import sqlalchemy as sa
 
@@ -22,16 +23,20 @@ def to_pytype(sqltype: sa.types.TypeEngine) -> type:
     return PYTYPES.get(sqltype._type_affinity, object)
 
 
+def wrap_table_object(table: str, engine: sa.Engine) -> sa.Table:
+    return sa.Table(table, sa.MetaData(), autoload_with=engine)
+
+
 def get_table_schema(table: str, engine: sa.Engine) -> dict[str, type]:
     # Table object
-    t = sa.Table(table, sa.MetaData(), autoload_with=engine)
+    t = wrap_table_object(table, engine)
     return {col.name: to_pytype(col.type) for col in t.columns}
 
 
 def make_select_query(
     table: str,
     columns: str | list[str] | None = None,
-    where: dict[str, tuple | list] | None = None,
+    where: dict[str, Any | list[Any] | tuple[Any | None, Any | None]] | None = None,
 ) -> str:
     """
     Maybe I should use SQLAlchemy to build the query .. it's like almost no change, so whatever.

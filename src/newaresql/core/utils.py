@@ -1,3 +1,5 @@
+import base64
+import datetime
 import json
 import os
 import pathlib
@@ -20,6 +22,34 @@ SCAN = {
 }
 
 
+class Encoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, datetime.datetime):
+            return {
+                "__type__": "datetime",
+                "value": o.isoformat(),
+            }
+
+        if isinstance(o, bytes):
+            return {
+                "__type__": "bytes",
+                "value": base64.b64encode(o).decode("ascii"),
+            }
+
+        return super().default(o)
+
+
+def decoder(obj):
+    match obj.get("__type__"):
+        case "datetime":
+            return datetime.datetime.fromisoformat(obj["value"])
+
+        case "bytes":
+            return base64.b64decode(obj["value"])
+
+    return obj
+
+
 def test_name(test: dict):
     """
     Generate a unique name for a test based on its identifying attributes.
@@ -34,7 +64,7 @@ def load_json(path: pathlib.Path) -> dict:
     Load a JSON file and return its contents as a dictionary.
     """
     with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+        return json.load(f, object_hook=decoder)
 
 
 def dump_json(data: dict, path: pathlib.Path) -> None:
@@ -42,7 +72,7 @@ def dump_json(data: dict, path: pathlib.Path) -> None:
     Dump a dictionary to a JSON file.
     """
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4)
+        json.dump(data, f, indent=4, cls=Encoder)
     return
 
 

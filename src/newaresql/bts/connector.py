@@ -5,11 +5,12 @@ from typing import Any
 
 import polars as pl
 
-from newaresql.bts.bdf import convert
+from newaresql.bdf import convert
 from newaresql.bts.schemas import get_data_schema
 from newaresql.bts.transform import extend_data, transform_aux, transform_main
 from newaresql.core.connector import SQLConnector
 from newaresql.core.orm import make_select_query
+from newaresql.core.utils import get_config
 
 
 class BTSConnector(SQLConnector):
@@ -21,6 +22,23 @@ class BTSConnector(SQLConnector):
         password: str | None = None,
         database: str | None = None,
     ):
+        if host is None:
+            host = get_config("bts_host", value=host)
+        if port is None:
+            port = get_config("bts_port", value=port)
+        if user is None:
+            user = get_config("bts_user", value=user)
+        if password is None:
+            password = get_config("bts_password", value=password)
+        if database is None:
+            database = get_config("bts_database", value=database)
+        if isinstance(port, str):
+            port = int(port)
+        if not all([host, port, user, password, database]):
+            raise ValueError(
+                "Missing required connection parameters: host, port, user, password, database"
+            )
+
         url = f"mysql+pymysql://{user}:{password}@{host}:{port}/{database}"
         super().__init__(url=url)
         return
@@ -53,8 +71,18 @@ class BTSConnector(SQLConnector):
         test: dict,
         columns: str | list[str] | None = None,
         where: dict[str, Any | list[Any] | tuple[Any | None, Any | None]] | None = None,
+        schema: dict[str, Any] | None = None,
     ) -> pl.DataFrame | None:
 
+        if where is None:
+            where = {}
+        where.update(
+            {
+                "unit_id": test["unit_id"],
+                "chl_id": test["chl_id"],
+                "test_id": test["test_id"],
+            }
+        )
         if test["main_first_table"] is None:
             q1 = None
         else:
@@ -81,15 +109,24 @@ class BTSConnector(SQLConnector):
         else:
             q = None
 
-        return self.get_query(q) if q else None
+        return self.get_query(q, schema=schema) if q else None
 
     def _get_aux_raw(
         self,
         test: dict,
         columns: str | list[str] | None = None,
         where: dict[str, Any | list[Any] | tuple[Any | None, Any | None]] | None = None,
+        schema: dict[str, Any] | None = None,
     ) -> pl.DataFrame | None:
-
+        if where is None:
+            where = {}
+        where.update(
+            {
+                "unit_id": test["unit_id"],
+                "chl_id": test["chl_id"],
+                "test_id": test["test_id"],
+            }
+        )
         if test["aux_first_table"] is None:
             q1 = None
         else:
@@ -115,7 +152,7 @@ class BTSConnector(SQLConnector):
             q = q2
         else:
             q = None
-        return self.get_query(q) if q else None
+        return self.get_query(q, schema=schema) if q else None
 
     def get_data(
         self,
@@ -129,19 +166,22 @@ class BTSConnector(SQLConnector):
         main_columns.remove("test_tmp")
         aux_columns = ["seq_id", "auxchl_id", "test_tmp"]
 
-        main = self._get_main_raw(test, columns=main_columns, where=where)
-        aux = self._get_aux_raw(test, columns=aux_columns, where=where)
+        main = self._get_main_raw(
+            test, columns=main_columns, where=where, schema=schema["main"]
+        )
+        aux = self._get_aux_raw(
+            test, columns=aux_columns, where=where, schema=schema["aux"]
+        )
         if (aux is not None) and (aux.height == 0):
             aux = None
 
         if main is None:
-            raise ValueError("Main data is empty")
+            main = pl.DataFrame(schema=schema["main"])
         else:
             main = transform_main(main, self.get_version(), test["dev_uid"])
-
         if aux is not None:
             aux = transform_aux(aux, self.get_version(), test["dev_uid"])
-            data = main.join(aux, on="seq_id", how="left")
+            data = main.join(aux, on="seq_id", how="left", maintain_order="left")
         else:
             data = main.with_columns(
                 auxchl_id=pl.lit(None).cast(pl.Int64),
@@ -150,6 +190,23 @@ class BTSConnector(SQLConnector):
         data = extend_data(data)
 
         return convert(data, "bts", "label")
+
+    def get_stats(self, test: dict) -> dict:
+        stats = {}
+        if test["main_second_table"] is None:
+            t = test["main_first_table"]
+            where = {
+                "unit_id": test["unit_id"],
+                "chl_id": test["chl_id"],
+                "test_id": test["test_id"],
+            }
+        else:
+            t = test["main_second_table"]
+            where = None
+
+        q = make_select_query(table=t, columns="MAX(seq_id) as max_seq_id", where=where)
+        stats["seq_id"] = self.get_query(q).select("max_seq_id").to_series().item()
+        return stats
 
 
 class BTS0760Connector(BTSConnector):

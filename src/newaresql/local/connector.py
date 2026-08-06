@@ -14,14 +14,19 @@ from newaresql.core.connector import BaseConnector, SQLConnector
 class SQLiteConnector(SQLConnector):
     def __init__(
         self,
-        path: str,
+        path: str | pathlib.Path | None = None,
     ):
+        path = utils.get_config("sqlite_path", value=path)
         super().__init__(url=f"sqlite+pysqlite:///{path}")
         return
 
     def __enter__(self) -> SQLiteConnector:
         super().__enter__()
         return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        super().__exit__(exc_type, exc_value, traceback)
+        return
 
     def delete_table(self, table: str) -> None:
         sa.Table(table, sa.MetaData()).drop(self._engine, checkfirst=True)
@@ -37,7 +42,11 @@ class SQLiteConnector(SQLConnector):
         return
 
     def get_tests(self) -> pl.DataFrame:
-        return self.read_table("tests")
+        if "tests" not in self.list_tables():
+            tests = pl.DataFrame()
+        else:
+            tests = self.read_table("tests")
+        return tests
 
     def list_tests(self) -> list[dict]:
         return self.get_tests().to_dicts()
@@ -72,26 +81,60 @@ class SQLiteConnector(SQLConnector):
         name = utils.test_name(test)
         return self.scan_table(name, columns=columns, where=where)
 
+    def get_stats(self, test: dict) -> dict:
+        stats = {}
+        name = utils.test_name(test)
+        if name in self.list_tables():
+            stats["seq_id"] = (
+                self.get_query(
+                    f"SELECT MAX(Record Count / 1) as max_seq_id FROM {name}"
+                )
+                .select("max_seq_id")
+                .to_series()
+                .item()
+            )
+        else:
+            stats["seq_id"] = None
+        return stats
+
 
 class FileConnector(BaseConnector):
     def __init__(
         self,
-        root: str | pathlib.Path,
-        format: str = "parquet",
+        path: str | pathlib.Path | None = None,
+        format: str | None = None,
     ):
-        super().__init__(config={"root": pathlib.Path(root), "format": format})
+        if path is None:
+            path = utils.get_config("file_path", value=path)
+
+        if format is None:
+            format = utils.get_config("file_format", value=format, default="parquet")
+        if not (path and format):
+            raise ValueError("Both 'path' and 'format' must be specified")
+        if format not in utils.WRITE:
+            raise ValueError(f"Unsupported format: {format}")
+
+        super().__init__(config={"path": pathlib.Path(path), "format": format})
+        return
+
+    def __enter__(self) -> FileConnector:
+        super().__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        super().__exit__(exc_type, exc_value, traceback)
         return
 
     @property
-    def root(self) -> pathlib.Path:
-        return self.config["root"]
+    def path(self) -> pathlib.Path:
+        return self.config["path"]
 
     @property
     def format(self) -> str:
         return self.config["format"]
 
     def delete_table(self, table: str) -> None:
-        path = self.root.joinpath(table)
+        path = self.path.joinpath(table)
         for f in path.glob(f"*.{self.format}"):
             f.unlink()
         if not any(path.iterdir()):
@@ -99,7 +142,7 @@ class FileConnector(BaseConnector):
         return
 
     def write_table(self, data: pl.DataFrame, table: str, append: bool = True) -> None:
-        path = self.root.joinpath(table)
+        path = self.path.joinpath(table)
         if not append:
             self.delete_table(table)
         if not path.exists():
@@ -113,7 +156,7 @@ class FileConnector(BaseConnector):
         columns: str | list[str] | None = None,
         where: dict[str, Any | list[Any] | tuple[Any | None, Any | None]] | None = None,
     ) -> pl.LazyFrame:
-        path = self.root.joinpath(table)
+        path = self.path.joinpath(table)
         lazy = utils.SCAN[self.format](path.joinpath(f"*.{self.format}"))
         return utils.filter_lazyframe(lazy, columns=columns, where=where)
 
@@ -138,7 +181,7 @@ class FileConnector(BaseConnector):
         yield from lazy.collect_batches(chunk_size=chunksize, maintain_order=True)
 
     def list_tests(self) -> list[dict]:
-        files = self.config["root"].rglob("*test.json")
+        files = self.path.rglob("*test.json")
         return [utils.load_json(f) for f in files]
 
     def get_tests(self) -> pl.DataFrame:
@@ -171,3 +214,22 @@ class FileConnector(BaseConnector):
     ) -> Generator[pl.DataFrame, None, None]:
         lazy = self.scan_data(test, columns=columns, where=where)
         yield from lazy.collect_batches(chunk_size=chunksize, maintain_order=True)
+
+    def get_stats(self, test: dict) -> dict:
+        stats = {}
+
+        name = utils.test_name(test)
+        path = self.path.joinpath(name)
+        if (path.exists()) and any(path.glob(f"*.{self.format}")):
+            stats["seq_id"] = (
+                self.scan_data(test)
+                .select("Record Count / 1")
+                .max()
+                .collect(engine="streaming")
+                .select("Record Count / 1")
+                .to_series()
+                .item()
+            )
+        else:
+            stats["seq_id"] = None
+        return stats
