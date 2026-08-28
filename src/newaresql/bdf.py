@@ -123,4 +123,5 @@ def convert(
     mapping = MAPPINGS.get((src, dst))
     if mapping is None:
         raise ValueError(f"No mapping found for {src} to {dst}")
-    return data.rename(mapping, strict=False).select(*mapping.values())
+    select = [d for s, d in mapping.items() if s in data.columns]
+    return data.rename(mapping, strict=False).select(*select)

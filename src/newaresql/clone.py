@@ -9,7 +9,7 @@ import polars as pl
 import tqdm.auto as tqdm
 
 import newaresql.bts
-import newaresql.core.utils as utils
+import newaresql.utils as utils
 import newaresql.local
 
 DEFAULT_CHUNKSIZE = 100_000

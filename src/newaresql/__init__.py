@@ -1,34 +1,88 @@
 import pathlib
 from typing import Literal
 
-import newaresql.bts as bts
-import newaresql.local as local
+import polars as pl
+
+import newaresql.defaults as defaults
+from newaresql.connectors.bts import BTSConnector
+from newaresql.connectors.files import FileConnector
+from newaresql.connectors.sql import SQLiteConnector
+from newaresql.interface import Test
+from newaresql.protocols import Connector
+from newaresql.types import Naming, Test, Where
+
+_TARGETS = {
+    "bts": BTSConnector,
+    "files": FileConnector,
+    "sqlite": SQLiteConnector,
+}
 
 
 def connect(
-    path: str | pathlib.Path | None = None,
-    format: str | None = None,
-    host: str | None = None,
-    port: str | int | None = None,
-    user: str | None = None,
-    password: str | None = None,
-    database: str | None = None,
-    version: str | None = None,
-    target: Literal["bts", "files", "sqlite"] = "files",
-):
+    target: Literal["bts", "files", "sqlite"] = "bts",
+    options: dict | None = None,
+) -> Connector:
+    """
+    Valid targets are "bts", "files", and "sqlite".
+    Valid options are target dependent
+        bts: host, port, username, password, database
+        files: root, file_format
+        sqlite: path
 
-    if target == "bts":
-        return bts.connect(
-            host=host,
-            port=port,
-            user=user,
-            password=password,
-            database=database,
-            version=version,
+
+    """
+    # Future support targets: duckdb, azureblob, ..., databrickssql
+    if target not in _TARGETS:
+        raise ValueError(
+            f"Invalid target: {target}. Valid values are: {list(_TARGETS.keys())}"
         )
-    elif target in ["files", "sqlite"]:
-        return local.connect(path=path, format=format, target=target)
 
-    raise ValueError(
-        f"Invalid target: {target}. Valid values are: ['bts', 'files', 'sqlite']"
-    )
+    if options is None:
+        options = {}
+    return _TARGETS[target](**options)
+
+
+def list_tests(
+    connector: Connector | None = None,
+    target: Literal["bts", "files", "sqlite"] = "bts",
+    options: dict | None = None,
+) -> list[dict]:
+    if connector is None:
+        with connect(target, options) as connector:
+            return list_tests(connector, target=target, options=options)
+    return connector.list_tests()
+
+
+def get_tests(
+    connector: Connector | None = None,
+    target: Literal["bts", "files", "sqlite"] = "bts",
+    options: dict | None = None,
+) -> pl.DataFrame:
+    if connector is None:
+        with connect(target, options) as connector:
+            return get_tests(connector, target=target, options=options)
+    return connector.get_tests()
+
+
+def get_data(
+    test: Test,
+    *,
+    where: Where | None = None,
+    naming: Naming = defaults.NAMING,
+    extend: bool = True,
+    connector: Connector | None = None,
+    target: Literal["bts", "files", "sqlite"] = "bts",
+    options: dict | None = None,
+) -> pl.DataFrame:
+    if connector is None:
+        with connect(target, options) as connector:
+            return get_data(
+                test,
+                where=where,
+                naming=naming,
+                extend=extend,
+                connector=connector,
+                target=target,
+                options=options,
+            )
+    return connector.get_data(test, where=where, naming=naming, extend=extend)
