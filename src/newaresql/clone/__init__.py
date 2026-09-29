@@ -3,6 +3,7 @@ import threading
 
 import tqdm.auto as tqdm
 
+import newaresql.defaults as defaults
 from newaresql.clone.sink import FileSink
 from newaresql.clone.source import BTSSource
 from newaresql.clone.tables import TableType, get_type
@@ -23,6 +24,7 @@ def clone_combo(
     combo: dict | None,
     source: Source,
     sink: Sink,
+    chunk_size: int = defaults.CHUNK_SIZE,
     event: threading.Event | None = None,
 ):
     source_index = source.get_max_seq_id(table, combo=combo)
@@ -42,7 +44,7 @@ def clone_combo(
         combo = {}
 
     for chunk in source.chunk_table(
-        table, where={**combo, "seq_id": (sink_index + 1, None)}
+        table, where={**combo, "seq_id": (sink_index + 1, None)}, chunk_size=chunk_size
     ):
         sink.update_data(table, chunk)
         if check_event(event):
@@ -51,13 +53,17 @@ def clone_combo(
 
 
 def clone_data(
-    table: str, source: Source, sink: Sink, event: threading.Event | None = None
+    table: str,
+    source: Source,
+    sink: Sink,
+    chunk_size: int = defaults.CHUNK_SIZE,
+    event: threading.Event | None = None,
 ):
     combos = source.get_combinations(table)
     if combos is None:
         combos = [None]
     for combo in combos:
-        clone_combo(table, combo, source, sink, event=event)
+        clone_combo(table, combo, source, sink, chunk_size=chunk_size, event=event)
         if check_event(event):
             return
     return
@@ -70,7 +76,11 @@ def clone_meta(table: str, source: Source, sink: Sink):
 
 
 def clone_table(
-    table: str, source: Source, sink: Sink, event: threading.Event | None = None
+    table: str,
+    source: Source,
+    sink: Sink,
+    chunk_size: int = defaults.CHUNK_SIZE,
+    event: threading.Event | None = None,
 ):
     """
     Clone a single table from the source to the sink.
@@ -79,20 +89,23 @@ def clone_table(
     - table: The name of the table to clone.
     - source: The source from which to clone the table.
     - sink: The sink to which to clone the table.
+    - chunk_size: The number of rows to process in each chunk. Defaults to the value in `defaults.CHUNK_SIZE`.
+    - event: An optional threading.Event to allow early termination.
     """
     table_type = get_type(table)
     if table_type == TableType.META:
         clone_meta(table, source, sink)
     elif table_type == TableType.OTHER:
-        pass
+        pass  # We skip 'other' table types
     else:
-        clone_data(table, source, sink, event=event)
+        clone_data(table, source, sink, chunk_size=chunk_size, event=event)
     return
 
 
 def clone_serially(
     source: Source,
     sink: Sink,
+    chunk_size: int = defaults.CHUNK_SIZE,
     progress: bool = True,
     event: threading.Event | None = None,
 ):
@@ -106,7 +119,7 @@ def clone_serially(
     - event: An optional threading.Event to allow early termination.
     """
     for table in tqdm.tqdm(source.list_tables(), disable=not progress):
-        clone_table(table, source, sink, event=event)
+        clone_table(table, source, sink, chunk_size=chunk_size, event=event)
         if check_event(event):
             return
 
@@ -114,6 +127,7 @@ def clone_serially(
 def clone_threaded(
     source: Source,
     sink: Sink,
+    chunk_size: int = defaults.CHUNK_SIZE,
     workers: int = -1,
     progress: bool = True,
     event: threading.Event | None = None,
@@ -132,11 +146,16 @@ def clone_threaded(
         raise ValueError("Number of workers cannot be zero.")
     if workers < -1:
         raise ValueError("Number of workers cannot be less than -1.")
-    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=None if workers == -1 else workers
+    ) as executor:
         futures = [
-            executor.submit(clone_table, table, source, sink, event=event)
+            executor.submit(
+                clone_table, table, source, sink, chunk_size=chunk_size, event=event
+            )
             for table in source.list_tables()
         ]
+        # Note: chunk_size is not used in clone_threaded, but it could be passed to clone_table if needed.
         for future in tqdm.tqdm(
             concurrent.futures.as_completed(futures),
             total=len(futures),
@@ -150,6 +169,7 @@ def clone(
     *,
     sink: str | Sink,
     source: str | Source,
+    chunk_size: int = defaults.CHUNK_SIZE,
     workers: int | None = None,
     progress: bool = True,
     event: threading.Event | None = None,
@@ -161,9 +181,18 @@ def clone(
         source = SOURCES[source]()
 
     if workers is None:
-        clone_serially(source, sink, progress=progress, event=event)
+        clone_serially(
+            source, sink, chunk_size=chunk_size, progress=progress, event=event
+        )
     else:
-        clone_threaded(source, sink, workers=workers, progress=progress, event=event)
+        clone_threaded(
+            source,
+            sink,
+            chunk_size=chunk_size,
+            workers=workers,
+            progress=progress,
+            event=event,
+        )
     return
 
 

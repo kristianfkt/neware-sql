@@ -1,9 +1,13 @@
+import logging
+
 import sqlalchemy as sa
 
 from newaresql.clone.tables import get_keys
 from newaresql.connectors.sql import SQLConnector
 from newaresql.utils.config import get_config
 from newaresql.utils.sql import wrap_table
+
+logger = logging.getLogger(__name__)
 
 
 class BTSSource(SQLConnector):
@@ -54,7 +58,8 @@ class BTSSource(SQLConnector):
 
     def get_max_seq_id(self, table: str, combo: dict | None = None) -> int | None:
         """
-        Fetch the maximum 'seq_id' of a table, or a subset of a table
+        Fetch the maximum 'seq_id' of a table, or a subset of a table.
+        Returns None if the table does not exist.
         """
         t = wrap_table(table, self.engine)
         stmt = sa.select(sa.func.max(t.c.seq_id).label("max_seq_id"))

@@ -6,12 +6,11 @@ from typing import Iterator
 import polars as pl
 import sqlalchemy as sa
 
+import newaresql.bdf as bdf
 import newaresql.defaults as defaults
-from newaresql.bdf import convert
-from newaresql.bts.transformations import extend_data, transform_aux, transform_main
+import newaresql.transformations as transformations
 from newaresql.connectors.sql import SQLConnector
 from newaresql.schemas import get_data_schema
-from newaresql.transformations import transform
 from newaresql.types import Columns, Naming, Test, Where
 from newaresql.utils.bts import make_aux_statement, make_main_statement
 from newaresql.utils.config import get_config
@@ -70,7 +69,6 @@ class BTSConnector(SQLConnector):
         super().__init__(url=url)
         return
 
-    # This is the main on
     @cache
     def get_version(self) -> str:
         query = "SELECT DISTINCT version FROM db_ver"
@@ -84,9 +82,15 @@ class BTSConnector(SQLConnector):
         return str(versions[0])
 
     def list_tests(self) -> list[dict]:
+        """
+        Returns a list of available tests as dictionaries.
+        """
         return self.get_tests().to_dicts()
 
     def get_tests(self) -> pl.DataFrame:
+        """
+        Returns a DataFrame containing all available tests in the database.
+        """
         version = self.get_version()
         if version not in _GET_TESTS:
             raise ValueError(f"Unsupported BTS version: {version}")
@@ -101,6 +105,19 @@ class BTSConnector(SQLConnector):
         naming: Naming = defaults.NAMING,
         extend: bool = True,
     ) -> pl.DataFrame:
+        """
+        Fetches main data for the specified test from the database.
+
+        Args:
+            test: The test for which to fetch main data.
+            where: Optional filtering conditions for the query.
+            columns: Optional list of columns to retrieve.
+            naming: Naming convention for the returned DataFrame.
+            extend: Whether to extend the data using transformations beyond row-by-row.
+
+        Returns:
+            A DataFrame containing the main data for the test.
+        """
         query = make_main_statement(
             test=test,
             engine=self.engine,
@@ -109,20 +126,14 @@ class BTSConnector(SQLConnector):
         )
         schema = get_data_schema(self.get_version(), test["dev_uid"])["main"]
 
-        # Apply where, columns, and naming transformations to the query as needed
-        # data = transform_main(
-        #     self.get_query(query, schema_overrides=pl.Schema(schema)),
-        #     self.get_version(),
-        #     test["dev_uid"],
-        # )
-        data = transform(
+        data = transformations.transform(
             self.get_query(query, schema_overrides=pl.Schema(schema)),
             self.get_version(),
             test["dev_uid"],
         )
         if extend:
-            data = extend_data(data)
-        return convert(data, "bts", naming)
+            data = transformations.extend(data)
+        return bdf.convert(data, "bts", naming)
 
     def get_aux_data(
         self,
@@ -143,14 +154,14 @@ class BTSConnector(SQLConnector):
         if query is None:
             data = pl.DataFrame(schema=schema)
         else:
-            data = transform_aux(
+            data = transformations.transform(
                 self.get_query(query, schema_overrides=pl.Schema(schema)),
                 self.get_version(),
                 test["dev_uid"],
             )
         if extend:
-            data = extend_data(data)
-        return convert(data, "bts", naming)
+            data = transformations.extend(data)
+        return bdf.convert(data, "bts", naming)
 
     def get_data(
         self,
@@ -160,22 +171,44 @@ class BTSConnector(SQLConnector):
         naming: Naming = defaults.NAMING,
         extend: bool = True,
     ) -> pl.DataFrame:
+        """
+        Fetches and combines the main and auxiliary data for a given test.
+        main- and auxillary columns are automatically included based on the test schema.
+
+        Args:
+            test: The test for which to fetch data.
+            where: Optional filtering conditions for the query.
+            naming: Naming convention for the returned DataFrame.
+            extend: Whether to extend the data using transformations beyond row-by-row.
+
+        Returns:
+            A DataFrame containing the combined main and auxiliary data for the test.
+        """
+        # Remove test_tmp
+        main_columns = get_data_schema(self.get_version(), test["dev_uid"])[
+            "main"
+        ].keys()
+        main_columns = [col for col in main_columns if col != "test_tmp"]
+        aux_columns = ["auxchl_id", "seq_id", "test_tmp"]
+
         main_data = self.get_main_data(
             test,
             where=where,
+            columns=main_columns,
             naming="bts",
             extend=False,
         )
         aux_data = self.get_aux_data(
             test,
             where=where,
+            columns=aux_columns,
             naming="bts",
             extend=False,
         )
-        data = main_data.drop("test_tmp").join(aux_data, on="seq_id", how="left")
+        data = main_data.join(aux_data, on="seq_id", how="left")
         if extend:
-            data = extend_data(data)
-        return convert(data, "bts", naming)
+            data = transformations.extend(data)
+        return bdf.convert(data, "bts", naming)
 
     def chunk_main_data(
         self,
@@ -187,6 +220,20 @@ class BTSConnector(SQLConnector):
         extend: bool = True,
         chunk_size: int = defaults.CHUNK_SIZE,
     ) -> Iterator[pl.DataFrame]:
+        """
+        Fetches the main data for a given test in chunks.
+
+        Args:
+            test: The test for which to fetch main data.
+            where: Optional filtering conditions for the query.
+            columns: Specific columns to fetch from the main data.
+            naming: Naming convention for the returned DataFrame.
+            extend: Whether to extend the data using transformations beyond row-by-row.
+            chunk_size: The number of rows per chunk.
+
+        Yields:
+            DataFrames containing chunks of the main data for the test.
+        """
         query = make_main_statement(
             test=test,
             engine=self.engine,
@@ -198,11 +245,13 @@ class BTSConnector(SQLConnector):
         for chunk in self.chunk_query(
             query, schema_overrides=pl.Schema(schema), chunk_size=chunk_size
         ):
-            chunk = transform_main(chunk, self.get_version(), test["dev_uid"])
+            chunk = transformations.transform(
+                chunk, self.get_version(), test["dev_uid"]
+            )
             if extend:
-                chunk = extend_data(chunk)
+                chunk = transformations.extend(chunk)
 
-            yield convert(chunk, "bts", naming)
+            yield bdf.convert(chunk, "bts", naming)
         return
 
     def chunk_aux_data(
@@ -215,6 +264,20 @@ class BTSConnector(SQLConnector):
         extend: bool = True,
         chunk_size: int = defaults.CHUNK_SIZE,
     ) -> Iterator[pl.DataFrame]:
+        """
+        Fetches the auxiliary data for a given test in chunks.
+
+        Args:
+            test: The test for which to fetch auxiliary data.
+            where: Optional filtering conditions for the query.
+            columns: Specific columns to fetch from the auxiliary data.
+            naming: Naming convention for the returned DataFrame.
+            extend: Whether to extend the data using transformations beyond row-by-row.
+            chunk_size: The number of rows per chunk.
+
+        Yields:
+            DataFrames containing chunks of the auxiliary data for the test.
+        """
         query = make_aux_statement(
             test=test,
             engine=self.engine,
@@ -228,9 +291,46 @@ class BTSConnector(SQLConnector):
         for chunk in self.chunk_query(
             query, schema_overrides=pl.Schema(schema), chunk_size=chunk_size
         ):
-            chunk = transform_aux(chunk, self.get_version(), test["dev_uid"])
+            chunk = transformations.transform(
+                chunk, self.get_version(), test["dev_uid"]
+            )
             if extend:
-                chunk = extend_data(chunk)
+                chunk = transformations.extend(chunk)
 
-            yield convert(chunk, "bts", naming)
+            yield bdf.convert(chunk, "bts", naming)
+        return
+
+    def chunk_data(
+        self,
+        test: Test,
+        *,
+        where: Where | None = None,
+        naming: Naming = defaults.NAMING,
+        extend: bool = True,
+        chunk_size: int = defaults.CHUNK_SIZE,
+    ) -> Iterator[pl.DataFrame]:
+        """
+        Fetches both main and auxiliary data for a given test in chunks.
+
+        Args:
+            test: The test for which to fetch data.
+            where: Optional filtering conditions for the query.
+            naming: Naming convention for the returned DataFrame.
+            extend: Whether to extend the data using transformations beyond row-by-row.
+            chunk_size: The number of rows per chunk.
+
+        Yields:
+            DataFrames containing chunks of the combined main and auxiliary data for the test.
+        """
+        i = 1
+        j = i + chunk_size
+        while True:
+            chunk = self.get_data(
+                test, where={"seq_id": (i, j)}, naming=naming, extend=extend
+            )
+            if chunk.is_empty():
+                break
+            yield chunk
+            i += chunk_size
+            j += chunk_size
         return

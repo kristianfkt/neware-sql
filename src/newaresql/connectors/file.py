@@ -88,17 +88,31 @@ class FileConnector:
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         return
 
-    def list_folders(self) -> list[str]:
-        return [f.stem for f in self._root.iterdir() if f.is_dir()]
+    def has_folder(self, folder: str) -> bool:
+        return (
+            self._root.joinpath(folder).exists()
+            and self._root.joinpath(folder).is_dir()
+        )
 
-    def list_files(self) -> list[str]:
-        return [f.stem for f in self._root.rglob(f"*.{self.file_format}")]
+    def list_folders(self) -> list[Path]:
+        if not self._root.exists():
+            return []
+        return [f for f in self._root.iterdir() if f.is_dir()]
+
+    def list_files(self) -> list[Path]:
+        if not self._root.exists():
+            return []
+        return [f for f in self._root.rglob(f"*.{self.file_format}")]
 
     def scan_folder(self, folder: str) -> pl.LazyFrame:
         return SCAN[self._file_format](self._root.joinpath(folder))
 
     def write_folder(
-        self, folder: str, data: pl.DataFrame, append: bool = True
+        self,
+        folder: str,
+        data: pl.DataFrame,
+        append: bool = True,
+        name: str | None = None,
     ) -> None:
         """
         Write a DataFrame to a folder, optionally appending to existing files.
@@ -111,6 +125,8 @@ class FileConnector:
         append : bool, optional
             Whether to append to existing files in the folder (default is True).
             False will delete all existing files, but keep the folder itself.
+        name : str | None, optional
+            The name of the file to write. If None, a UUID-based name will be generated.
         """
         path = self.root.joinpath(folder)
         if not path.exists():
@@ -120,7 +136,9 @@ class FileConnector:
             for f in path.glob(f"*.{self.file_format}"):
                 f.unlink()
 
-        file = self.root.joinpath(folder).joinpath(f"{uuid.uuid4()}.{self.file_format}")
+        if name is None:
+            name = f"{uuid.uuid4()}.{self.file_format}"
+        file = self.root.joinpath(folder).joinpath(name)
         WRITE[self.file_format](data, file)
         return
 

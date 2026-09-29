@@ -28,6 +28,10 @@ STEP_TYPE_MAPPING = {
 
 TRANSFORMATIONS_24 = Registry()
 
+step_time = TRANSFORMATIONS_24.add(
+    alias="step_time",
+    expression=pl.col("test_time") / 1000,
+)
 
 test_vol = TRANSFORMATIONS_24.add(
     alias="test_vol",

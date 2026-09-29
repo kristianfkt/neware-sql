@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 import polars as pl
@@ -10,6 +11,8 @@ from newaresql.connectors.sql import SQLConnector
 from newaresql.types import FileFormat
 from newaresql.utils.config import get_config
 from newaresql.utils.sql import wrap_table
+
+logger = logging.getLogger(__name__)
 
 
 class SQLSink(SQLConnector):
@@ -49,7 +52,7 @@ class FileSink(FileConnector):
         return
 
     def list_tables(self) -> list[str]:
-        return self.list_folders()
+        return [f.stem for f in self.list_folders()]
 
     def contains_table(self, table: str) -> bool:
         return table in self.list_tables()
@@ -61,6 +64,8 @@ class FileSink(FileConnector):
         """
         Fetch the maximum 'seq_id' of a table, or a subset of a table
         """
+        if not self.contains_table(table):
+            return None
         lazy = self.scan_table(table)
         if combo:
             lazy = filter_lazyframe(lazy, where=combo)

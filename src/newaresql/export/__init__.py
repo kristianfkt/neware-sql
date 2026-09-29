@@ -1,7 +1,7 @@
 import concurrent.futures
 import threading
-from multiprocessing import Value
 
+import polars as pl
 import tqdm.auto as tqdm
 
 from newaresql import defaults
@@ -17,13 +17,29 @@ def check_event(event: threading.Event | None) -> bool:
     return event.is_set() if event is not None else False
 
 
+def get_tests_to_update(source: Source, sink: Sink) -> list[Test]:
+    #
+    #  We want to remove all tests from source where sink has end-time
+    tests_source = source.get_tests()
+    tests_sink = sink.get_tests()
+    if (tests_sink is None) or tests_sink.is_empty():
+        tests = tests_source.to_dicts()
+    else:
+        tests = tests_source.join(
+            tests_sink.filter(pl.col("end_time").is_not_null()),
+            on=["dev_uid", "unit_id", "chl_id", "test_id"],
+            how="anti",
+        ).to_dicts()
+    return tests
+
+
 def export_test(
     test: Test,
     source: Source,
     sink: Sink,
     chunk_size: int = defaults.CHUNK_SIZE,
     event: threading.Event | None = None,
-):
+) -> None:
     """
     Export a single test from the source to the sink.
 
@@ -38,11 +54,12 @@ def export_test(
     if check_event(event):
         return
 
-    if sink.get_status(test) == "finished":
-        return
-
-    if sink.contains_test(test):
-        where = {"seq_id": (sink.get_max_seq_id(test) + 1, None)}
+    if sink.contains_test(test) and (seq_id := sink.get_max_seq_id(test)) is not None:
+        seq_id = sink.get_max_seq_id(test)
+        if isinstance(seq_id, int):
+            where = {"seq_id": (seq_id + 1, None)}
+        else:
+            where = None
     else:
         where = None
 
@@ -68,12 +85,15 @@ def export_threaded(
     if workers < -1:
         raise ValueError("Number of workers cannot be less than -1.")
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+    tests = get_tests_to_update(source, sink)
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=None if workers == -1 else workers
+    ) as executor:
         futures = [
             executor.submit(
                 export_test, test, source, sink, chunk_size=chunk_size, event=event
             )
-            for test in source.list_tests()
+            for test in tests
         ]
         for future in tqdm.tqdm(
             concurrent.futures.as_completed(futures),
@@ -91,7 +111,8 @@ def export_serially(
     chunk_size: int = defaults.CHUNK_SIZE,
     event: threading.Event | None = None,
 ):
-    for test in tqdm.tqdm(source.list_tests(), disable=not progress):
+    tests = get_tests_to_update(source, sink)
+    for test in tqdm.tqdm(tests, disable=not progress):
         export_test(test, source, sink, chunk_size=chunk_size, event=event)
         if check_event(event):
             return
@@ -105,14 +126,19 @@ def export(
     chunk_size: int = defaults.CHUNK_SIZE,
     event: threading.Event | None = None,
 ):
+
     if workers is None:
         export_serially(
-            source, sink, progress=progress, chunk_size=chunk_size, event=event
+            source,
+            sink,
+            progress=progress,
+            chunk_size=chunk_size,
+            event=event,
         )
     else:
         export_threaded(
-            source,
-            sink,
+            source=source,
+            sink=sink,
             workers=workers,
             progress=progress,
             chunk_size=chunk_size,
