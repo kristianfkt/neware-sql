@@ -12,6 +12,9 @@ from newaresql.types import Test
 Source = BTSSource
 Sink = FileSink
 
+SOURCE = {"bts": BTSSource}
+SINK = {"file": FileSink}
+
 
 def check_event(event: threading.Event | None) -> bool:
     return event.is_set() if event is not None else False
@@ -145,6 +148,12 @@ def export(
             event=event,
         )
     return
+
+
+def connect(sink: str, **options) -> Sink:
+    if isinstance(sink, str):
+        sink = SINK[sink](**options)  # type: ignore
+    return sink  # type: ignore
 
 
 if __name__ == "__main__":
