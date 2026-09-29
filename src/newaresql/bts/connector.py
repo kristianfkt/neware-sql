@@ -8,14 +8,16 @@ import sqlalchemy as sa
 
 import newaresql.defaults as defaults
 from newaresql.bdf import convert
-from newaresql.connectors.sql import SQLConnector, make_select_stmt
+from newaresql.bts.transformations import extend_data, transform_aux, transform_main
+from newaresql.connectors.sql import SQLConnector
 from newaresql.schemas import get_data_schema
-from newaresql.transformations import extend_data, transform_aux, transform_main
+from newaresql.transformations import transform
 from newaresql.types import Columns, Naming, Test, Where
-from newaresql.utils import get_config
+from newaresql.utils.bts import make_aux_statement, make_main_statement
+from newaresql.utils.config import get_config
 
 
-def _get_tests_0760(connector: BTSConnector) -> pl.DataFrame:
+def get_tests_0760(connector: BTSConnector) -> pl.DataFrame:
     test = connector.get_table("test")
     h_test = connector.get_table("h_test")
     test_note = connector.get_table("test_note")
@@ -25,7 +27,7 @@ def _get_tests_0760(connector: BTSConnector) -> pl.DataFrame:
     return tests
 
 
-def _get_tests_0800(connector: BTSConnector) -> pl.DataFrame:
+def get_tests_0800(connector: BTSConnector) -> pl.DataFrame:
     tables = ["test"] + [
         table for table in connector.list_tables() if table.startswith("h_test")
     ]
@@ -34,84 +36,9 @@ def _get_tests_0800(connector: BTSConnector) -> pl.DataFrame:
 
 
 _GET_TESTS = {
-    "0760": _get_tests_0760,
-    "0800": _get_tests_0800,
+    "0760": get_tests_0760,
+    "0800": get_tests_0800,
 }
-
-
-def _make_main_query(
-    test: Test,
-    engine: sa.engine.Engine,
-    where: Where | None = None,
-    columns: Columns | None = None,
-) -> sa.Select | sa.CompoundSelect:
-    if where is None:
-        where = {}
-    where["unit_id"] = test["unit_id"]
-    where["chl_id"] = test["chl_id"]
-    where["test_id"] = test["test_id"]
-
-    q1 = make_select_stmt(
-        test["main_first_table"],
-        engine,
-        where=where,
-        columns=columns,
-    )
-    if test["main_second_table"] is None:
-        q2 = None
-    else:
-        q2 = make_select_stmt(
-            test["main_second_table"],
-            engine,
-            where=where,
-            columns=columns,
-        )
-    if q2 is None:
-        q = q1
-    else:
-        q = q1.union_all(q2)
-    return q
-
-
-def _make_aux_query(
-    test: Test,
-    engine: sa.engine.Engine,
-    where: Where | None = None,
-    columns: Columns | None = None,
-) -> sa.Select | sa.CompoundSelect | None:
-    if where is None:
-        where = {}
-    where["unit_id"] = test["unit_id"]
-    where["chl_id"] = test["chl_id"]
-    where["test_id"] = test["test_id"]
-
-    if test["aux_first_table"] is None:
-        q1 = None
-    else:
-        q1 = make_select_stmt(
-            test["aux_first_table"],
-            engine,
-            where=where,
-            columns=columns,
-        )
-    if test["aux_second_table"] is None:
-        q2 = None
-    else:
-        q2 = make_select_stmt(
-            test["aux_second_table"],
-            engine,
-            where=where,
-            columns=columns,
-        )
-    if (q1 is None) and (q2 is None):
-        q = None
-    elif q2 is None:
-        q = q1
-    elif q1 is None:
-        q = q2
-    else:
-        q = q1.union_all(q2)
-    return q
 
 
 class BTSConnector(SQLConnector):
@@ -143,6 +70,7 @@ class BTSConnector(SQLConnector):
         super().__init__(url=url)
         return
 
+    # This is the main on
     @cache
     def get_version(self) -> str:
         query = "SELECT DISTINCT version FROM db_ver"
@@ -154,6 +82,9 @@ class BTSConnector(SQLConnector):
                 f"Expected one version, got {len(versions)} versions: {versions}"
             )
         return str(versions[0])
+
+    def list_tests(self) -> list[dict]:
+        return self.get_tests().to_dicts()
 
     def get_tests(self) -> pl.DataFrame:
         version = self.get_version()
@@ -170,7 +101,7 @@ class BTSConnector(SQLConnector):
         naming: Naming = defaults.NAMING,
         extend: bool = True,
     ) -> pl.DataFrame:
-        query = _make_main_query(
+        query = make_main_statement(
             test=test,
             engine=self.engine,
             where=where,
@@ -179,7 +110,12 @@ class BTSConnector(SQLConnector):
         schema = get_data_schema(self.get_version(), test["dev_uid"])["main"]
 
         # Apply where, columns, and naming transformations to the query as needed
-        data = transform_main(
+        # data = transform_main(
+        #     self.get_query(query, schema_overrides=pl.Schema(schema)),
+        #     self.get_version(),
+        #     test["dev_uid"],
+        # )
+        data = transform(
             self.get_query(query, schema_overrides=pl.Schema(schema)),
             self.get_version(),
             test["dev_uid"],
@@ -197,7 +133,7 @@ class BTSConnector(SQLConnector):
         naming: Naming = defaults.NAMING,
         extend: bool = True,
     ) -> pl.DataFrame:
-        query = _make_aux_query(
+        query = make_aux_statement(
             test,
             self.engine,
             where=where,
@@ -236,12 +172,12 @@ class BTSConnector(SQLConnector):
             naming="bts",
             extend=False,
         )
-        data = main_data.join(aux_data, on="seq_id", how="left")
+        data = main_data.drop("test_tmp").join(aux_data, on="seq_id", how="left")
         if extend:
             data = extend_data(data)
         return convert(data, "bts", naming)
 
-    def stream_main_data(
+    def chunk_main_data(
         self,
         test: Test,
         *,
@@ -251,7 +187,7 @@ class BTSConnector(SQLConnector):
         extend: bool = True,
         chunk_size: int = defaults.CHUNK_SIZE,
     ) -> Iterator[pl.DataFrame]:
-        query = _make_main_query(
+        query = make_main_statement(
             test=test,
             engine=self.engine,
             where=where,
@@ -259,7 +195,7 @@ class BTSConnector(SQLConnector):
         )
         schema = get_data_schema(self.get_version(), test["dev_uid"])["main"]
 
-        for chunk in self.stream_query(
+        for chunk in self.chunk_query(
             query, schema_overrides=pl.Schema(schema), chunk_size=chunk_size
         ):
             chunk = transform_main(chunk, self.get_version(), test["dev_uid"])
@@ -269,7 +205,7 @@ class BTSConnector(SQLConnector):
             yield convert(chunk, "bts", naming)
         return
 
-    def stream_aux_data(
+    def chunk_aux_data(
         self,
         test: Test,
         *,
@@ -279,7 +215,7 @@ class BTSConnector(SQLConnector):
         extend: bool = True,
         chunk_size: int = defaults.CHUNK_SIZE,
     ) -> Iterator[pl.DataFrame]:
-        query = _make_aux_query(
+        query = make_aux_statement(
             test=test,
             engine=self.engine,
             where=where,
@@ -289,7 +225,7 @@ class BTSConnector(SQLConnector):
         if query is None:
             return
 
-        for chunk in self.stream_query(
+        for chunk in self.chunk_query(
             query, schema_overrides=pl.Schema(schema), chunk_size=chunk_size
         ):
             chunk = transform_aux(chunk, self.get_version(), test["dev_uid"])

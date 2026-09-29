@@ -1,4 +1,4 @@
-from typing import Self
+from typing import Literal, Self
 
 
 class Test:
@@ -24,3 +24,6 @@ class Connector:
     def get_data(self, test: Test | dict): ...
 
     def stream_data(self, test: Test | dict): ...
+
+
+

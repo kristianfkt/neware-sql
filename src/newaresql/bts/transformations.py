@@ -6,6 +6,13 @@ import polars as pl
 logger = logging.getLogger(__name__)
 
 
+def _get_required(expression: pl.Expr) -> set[str]:
+    """
+    Returns a set of required column names for the given expression.
+    """
+    return set(expression.meta.root_names())
+
+
 def _check_required(data: pl.DataFrame | pl.LazyFrame, expression: pl.Expr) -> bool:
     """
     Checks if all columns required by the expression are present in the DataFrame.
@@ -15,15 +22,8 @@ def _check_required(data: pl.DataFrame | pl.LazyFrame, expression: pl.Expr) -> b
         cols = data.collect_schema().names()
     else:
         cols = data.columns
-    required = set(expression.meta.root_names())
+    required = _get_required(expression)
     return all(col in cols for col in required)
-
-
-def _get_required(expression: pl.Expr) -> set[str]:
-    """
-    Returns a set of required column names for the given expression.
-    """
-    return set(expression.meta.root_names())
 
 
 def _0760_main_24(data: pl.DataFrame) -> pl.DataFrame:
@@ -296,3 +296,6 @@ def extend_data(data: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame | pl.LazyFram
                 f"Skipping enrichment of {name} column due to missing required columns"
             )
     return data
+
+
+

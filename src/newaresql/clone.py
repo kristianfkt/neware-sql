@@ -8,9 +8,8 @@ from typing import Callable, Generator, Literal
 import polars as pl
 import tqdm.auto as tqdm
 
-import newaresql.bts
+import newaresql.connectors
 import newaresql.utils as utils
-import newaresql.local
 
 DEFAULT_CHUNKSIZE = 100_000
 
@@ -40,8 +39,8 @@ def _tests_antijoin(remote: pl.DataFrame, local: pl.DataFrame) -> pl.DataFrame:
 
 def _stream_chunks(
     test: dict,
-    remote: newaresql.bts.BTSConnector,
-    local: newaresql.local.FileConnector | newaresql.local.SQLiteConnector,
+    remote: newaresql.connectors.BTSConnector,
+    local: newaresql.connectors.FileConnector | newaresql.connectors.SQLiteConnector,
     chunksize: int = DEFAULT_CHUNKSIZE,
     event: Event | None = None,
 ) -> Generator[pl.DataFrame, None, None]:
@@ -62,8 +61,8 @@ def _stream_chunks(
 
 def test_to_files(
     test: dict,
-    remote: newaresql.bts.BTSConnector,
-    local: newaresql.local.FileConnector,
+    remote: newaresql.connectors.BTSConnector,
+    local: newaresql.connectors.FileConnector,
     chunksize: int = DEFAULT_CHUNKSIZE,
     event: Event | None = None,
     lock: LockType | None = None,
@@ -78,8 +77,8 @@ def test_to_files(
 
 def test_to_sqlite(
     test: dict,
-    remote: newaresql.bts.BTSConnector,
-    local: newaresql.local.SQLiteConnector,
+    remote: newaresql.connectors.BTSConnector,
+    local: newaresql.connectors.SQLiteConnector,
     chunksize: int = DEFAULT_CHUNKSIZE,
     event: Event | None = None,
     lock: LockType | None = None,
@@ -117,8 +116,8 @@ def test_to_sqlite(
 
 def _serial(
     tests: list[dict],
-    remote: newaresql.bts.BTSConnector,
-    local: newaresql.local.FileConnector | newaresql.local.SQLiteConnector,
+    remote: newaresql.connectors.BTSConnector,
+    local: newaresql.connectors.FileConnector | newaresql.connectors.SQLiteConnector,
     chunksize: int = DEFAULT_CHUNKSIZE,
     event: Event | None = None,
     callback: Callable[[dict], bool] | None = None,
@@ -200,6 +199,7 @@ def _parallel(
 
 
 def clone(
+    
     path: str | pathlib.Path | None = None,
     format: str | None = None,
     host: str | None = None,

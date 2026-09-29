@@ -26,8 +26,8 @@ class Field:
     code: str
 
 
-DATA_FIELDS = []
-STEP_FIELDS = []
+DATA_FIELDS = []  # Timeseries data fields
+STEP_FIELDS = []  # Step-level data fields
 
 # Counters and indexes
 DATA_FIELDS += [
