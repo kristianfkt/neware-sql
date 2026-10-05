@@ -3,7 +3,7 @@ from newaresql.bts.connector import BTSConnector
 
 def connect(
     host: str | None = None,
-    port: int | None = None,
+    port: int | str | None = None,
     database: str | None = None,
     username: str | None = None,
     password: str | None = None,

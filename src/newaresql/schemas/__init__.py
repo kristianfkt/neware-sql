@@ -1,7 +1,5 @@
 import logging
 
-import polars as pl
-
 from newaresql.schemas import schemas_0760, schemas_0800
 
 logger = logging.getLogger(__name__)
@@ -14,6 +12,16 @@ _SCHEMAS: dict[str, dict[str, dict[str, type]]] = {
 
 
 def get_data_schema(version: str, dev_uid: int) -> dict[str, dict[str, type]]:
+    """
+    Fetches the data schema (name-type mapping) for the given BTS build version and device UID.
+
+    Args:
+        version (str): The BTS build version.
+        dev_uid (int): The device UID.
+
+    Returns:
+        dict[str, dict[str, type]]: The data schema for the specified version and device.
+    """
     logger.debug(f"Getting data schema for version {version} and device UID {dev_uid}")
 
     dev_type = str(dev_uid)[:2]

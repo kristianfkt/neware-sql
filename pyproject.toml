@@ -8,6 +8,7 @@ authors = [
 ]
 requires-python = ">=3.11"
 dependencies = [
+    "adlfs>=2026.8.0",
     "pandas>=3.0.4",
     "polars",
     "pyarrow>=24.0.0",

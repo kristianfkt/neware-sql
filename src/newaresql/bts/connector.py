@@ -44,7 +44,7 @@ class BTSConnector(SQLConnector):
     def __init__(
         self,
         host: str | None = None,
-        port: int | None = None,
+        port: int | str | None = None,
         database: str | None = None,
         username: str | None = None,
         password: str | None = None,
@@ -55,7 +55,13 @@ class BTSConnector(SQLConnector):
         database = get_config("NEWARE_BTS_DATABASE", value=database)
         username = get_config("NEWARE_BTS_USERNAME", value=username)
         password = get_config("NEWARE_BTS_PASSWORD", value=password)
-        if not all([host, port, database, username, password]):
+        if (
+            host is None
+            or port is None
+            or database is None
+            or username is None
+            or password is None
+        ):
             raise ValueError("Missing required BTS connection parameters")
 
         url = sa.URL.create(
@@ -63,7 +69,7 @@ class BTSConnector(SQLConnector):
             username=username,
             password=password,
             host=host,
-            port=port,
+            port=int(port),
             database=database,
         )
         super().__init__(url=url)

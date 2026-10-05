@@ -13,36 +13,16 @@ Connecting the the MySQL database requires
 The actual connection is handled by an SQLAlchemy engine.
 Credentials must be provided explicitly, or made availabe as enviroment variables on the form `BTS_HOST`, `BTS_PORT`, *etc*.  
 
-## Pre-check
-To confirm that everything works as intended, the code block below will establish connection, check BTS build version and list the number of tables in the database. 
-``` 
-import newaresql.connect
-
-credentials = dict(host=..., port=..., user=..., password=..., database=...)
-
-with newaresql.connect.Connector(**credentials) as connector:
-  try:
-      ver = connector.version
-      print(f"Build version {ver} is running on the database")
-  except Exception as e:
-      print(f"Faile to get build version with error {e}")
-
-  try:
-      tables = conn.tables
-      print(f"Found the following {len(tables)} tables in the database:")
-  except Exception as e:
-      print(f"Faile to fetch list of table names with error {e}")
-```
 
 ## Simple example
 The preffered way is the establish a re-useable connection ... 
 
 ```
-import newaresql
+import newaresql.bts as bts
 
-credentials = dict(host=..., port=..., user=..., password=..., database=...)
+credentials = dict(host=..., port=..., username=..., password=..., database=...)
 
-with newaresql.connect(**credentials): as connection:
+with bts.connect(**credentials): as connection:
     tests = newaresql.list_tests(connection=connection)
     data = newaresql.get_data(tests[0], connection=connection)
 ```
@@ -71,12 +51,8 @@ Data transformations from Neware's integer values to actual measurements is impl
 Conversion between Neware column names and BDF labels and machine codes are implemented in `bdf.py`.
 
 # TO-DO
-- Some columns, such as `test_cur`, requires `cur_step_range` in order to transform BTS-data to actual data. Take this into consideration so that all required columns are queried, where redundant columns are later discarded after use. 
-- For step aggregation: Map out column/variable categories, *i.e.* "Current / A" is data column, while 'Step Type / 1' is of some other category.
-  - This can be added to the BDF Field level. 
-- Add test-statistics summary to the connector class, i.e. min/max seq_id, cycle, *etc*.
-- Figure out automatic versioning or something. 
-- Generate documentation. 
-- Complete docstrings. 
-- Add a clone-submodule where polars writes each test to files. Support parquet, csv, feather/ipc and ndjson. 
-- Add a Test class for convenience. 
+- Implement the SQL- and Blob sinks for clone
+- Implement the SQL- and Blob sinks for export
+- Separate main- and aux data export. 
+- Decide on metadata vs tests
+- Add a dashboard

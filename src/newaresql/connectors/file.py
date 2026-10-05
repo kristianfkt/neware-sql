@@ -60,7 +60,7 @@ def filter_lazyframe(
     return lazy
 
 
-class FileConnector:
+class FileSystemConnector:
     def __init__(
         self,
         *,
