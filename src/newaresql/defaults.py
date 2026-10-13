@@ -1,4 +1,5 @@
 from typing import Literal
 
-NAMING: Literal["bts"] = "bts"
-CHUNK_SIZE: int = int(1e5)
+NAMING: Literal["label"] = "label"
+TRANSFORM: Literal[True] = True
+JOIN: Literal["local", "database"] = "local"
