@@ -1,5 +1,9 @@
 # import pathlib
 # from typing import Literal
+from collections.abc import Callable
+
+from newaresql.models import Test
+from newaresql.protocols import Connector
 
 # import polars as pl
 
@@ -87,3 +91,28 @@
 #                 options=options,
 #             )
 #     return connector.get_data(test, where=where, naming=naming, extend=extend)
+
+
+def map_tests(connector: Connector) -> dict[str, Test]:
+    return {
+        Test(metadata=test, connector=connector).name: Test(
+            metadata=test, connector=connector
+        )
+        for test in connector.list_tests()
+    }
+
+
+def search_tests(
+    connector: Connector, callback: Callable[[Test], bool]
+) -> dict[str, Test]:
+    """
+    Search for tests that match the given field values.
+    Recommended keywords are batch_no and remark (correspond to P/N name and comment fields in BTS)
+    """
+    return {
+        Test(metadata=test, connector=connector).name: Test(
+            metadata=test, connector=connector
+        )
+        for test in connector.list_tests()
+        if callback(Test(metadata=test, connector=connector))
+    }

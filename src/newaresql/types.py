@@ -8,8 +8,8 @@ Between: TypeAlias = tuple[Scalar, Scalar]
 LessOrEqual: TypeAlias = tuple[None, Scalar]
 GreaterOrEqual: TypeAlias = tuple[Scalar, None]
 
-WhereClause: TypeAlias = Equal | In | Between | LessOrEqual | GreaterOrEqual
-Where: TypeAlias = dict[str, WhereClause]
+Condition: TypeAlias = Equal | In | Between | LessOrEqual | GreaterOrEqual
+Conditions: TypeAlias = dict[str, Condition]
 
 
 Test: TypeAlias = dict[str, Any]

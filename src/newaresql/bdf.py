@@ -1,3 +1,4 @@
+import itertools
 import logging
 from dataclasses import dataclass
 from typing import Literal
@@ -19,11 +20,15 @@ class Field:
         bts (str): The name of the column in the BTS database.
         label (str): The human-readable label for the column.
         code (str): The code representation for the column.
+        mapping (dict[str, str]): A dictionary mapping "bts", "label", and "code" to their respective values.
     """
 
     bts: str
     label: str
     code: str
+
+    def __getitem__(self, key: str) -> str:
+        return getattr(self, key)
 
 
 DATA_FIELDS = []  # Timeseries data fields
@@ -93,10 +98,8 @@ DATA_FIELDS += [
 FIELDS = list(set(DATA_FIELDS + STEP_FIELDS))
 
 MAPPINGS = {
-    (src, dst): {getattr(field, src): getattr(field, dst) for field in FIELDS}
-    for src in ["bts", "code", "label"]
-    for dst in ["bts", "code", "label"]
-    if src != dst
+    (src, dst): {field[src]: field[dst] for field in FIELDS}
+    for src, dst in itertools.permutations(["bts", "code", "label"], 2)
 }
 
 
@@ -110,6 +113,9 @@ def convert(
     src - source
     dst - destination
     Valid values for src and dst are: "bts", "code", "label"
+        bts - column names are kept as-is in the BTS MySQL database
+        code - column names are converted to the bdf code format, i.e. voltage_volt
+        label - column names are converted to the human-readable label, i.e. Voltage / V
     """
     valid = {"bts", "code", "label"}
     if src not in valid:

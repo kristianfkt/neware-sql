@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import concurrent.futures
 from functools import cache
 from typing import Iterator
 
@@ -10,6 +11,7 @@ import newaresql.bdf as bdf
 import newaresql.defaults as defaults
 import newaresql.transformations as transformations
 from newaresql.connectors.sql import SQLConnector
+from newaresql.protocols import Connector
 from newaresql.schemas import get_data_schema
 from newaresql.types import Columns, Naming, Test, Where
 from newaresql.utils.bts import make_aux_statement, make_main_statement
@@ -40,7 +42,7 @@ _GET_TESTS = {
 }
 
 
-class BTSConnector(SQLConnector):
+class BTSConnector(SQLConnector, Connector):
     def __init__(
         self,
         host: str | None = None,
@@ -101,6 +103,26 @@ class BTSConnector(SQLConnector):
         if version not in _GET_TESTS:
             raise ValueError(f"Unsupported BTS version: {version}")
         return _GET_TESTS[version](self)
+
+    def get_stats(self, test: Test) -> dict:
+        """
+        Returns statistics for the specified test as a dictionary.
+        """
+        main = make_main_statement(
+            test=test, engine=self.engine, columns=["cycle", "seq_id", "test_atime"]
+        ).subquery()
+        stmt = sa.select(
+            sa.func.max(main.c.cycle).label("cycle_count"),
+            sa.func.max(main.c.seq_id).label("record_count"),
+            sa.func.timestampdiff(
+                sa.text("HOUR"),
+                sa.func.min(main.c.test_atime),
+                sa.func.max(main.c.test_atime),
+            ).label("duration_hour"),
+            sa.func.min(main.c.test_atime).label("first_timestamp"),
+            sa.func.max(main.c.test_atime).label("last_timestamp"),
+        )
+        return self.get_query(stmt).to_dicts()[0]
 
     def get_main_data(
         self,
@@ -197,20 +219,25 @@ class BTSConnector(SQLConnector):
         main_columns = [col for col in main_columns if col != "test_tmp"]
         aux_columns = ["auxchl_id", "seq_id", "test_tmp"]
 
-        main_data = self.get_main_data(
-            test,
-            where=where,
-            columns=main_columns,
-            naming="bts",
-            extend=False,
-        )
-        aux_data = self.get_aux_data(
-            test,
-            where=where,
-            columns=aux_columns,
-            naming="bts",
-            extend=False,
-        )
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future_main = executor.submit(
+                self.get_main_data,
+                test,
+                where=dict(where) if where is not None else None,
+                columns=main_columns,
+                naming="bts",
+                extend=False,
+            )
+            future_aux = executor.submit(
+                self.get_aux_data,
+                test,
+                where=dict(where) if where is not None else None,
+                columns=aux_columns,
+                naming="bts",
+                extend=False,
+            )
+            main_data = future_main.result()
+            aux_data = future_aux.result()
         data = main_data.join(aux_data, on="seq_id", how="left")
         if extend:
             data = transformations.extend(data)
@@ -304,39 +331,4 @@ class BTSConnector(SQLConnector):
                 chunk = transformations.extend(chunk)
 
             yield bdf.convert(chunk, "bts", naming)
-        return
-
-    def chunk_data(
-        self,
-        test: Test,
-        *,
-        where: Where | None = None,
-        naming: Naming = defaults.NAMING,
-        extend: bool = True,
-        chunk_size: int = defaults.CHUNK_SIZE,
-    ) -> Iterator[pl.DataFrame]:
-        """
-        Fetches both main and auxiliary data for a given test in chunks.
-
-        Args:
-            test: The test for which to fetch data.
-            where: Optional filtering conditions for the query.
-            naming: Naming convention for the returned DataFrame.
-            extend: Whether to extend the data using transformations beyond row-by-row.
-            chunk_size: The number of rows per chunk.
-
-        Yields:
-            DataFrames containing chunks of the combined main and auxiliary data for the test.
-        """
-        i = 1
-        j = i + chunk_size
-        while True:
-            chunk = self.get_data(
-                test, where={"seq_id": (i, j)}, naming=naming, extend=extend
-            )
-            if chunk.is_empty():
-                break
-            yield chunk
-            i += chunk_size
-            j += chunk_size
         return

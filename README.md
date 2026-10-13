@@ -56,3 +56,4 @@ Conversion between Neware column names and BDF labels and machine codes are impl
 - Separate main- and aux data export. 
 - Decide on metadata vs tests
 - Add a dashboard
+- The transformations *via* classes is overengineered. Replace with simple dict and a graph.  

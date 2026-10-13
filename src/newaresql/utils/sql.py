@@ -31,7 +31,7 @@ def to_pytype(sqltype: sa.types.TypeEngine) -> type:
         _t = PYTYPES[affinity]
     else:
         try:
-            _t = sqltype.python_type()
+            _t = sqltype.python_type
         except NotImplementedError:
             _t = object
     return _t
