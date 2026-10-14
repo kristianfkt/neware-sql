@@ -62,3 +62,4 @@ Conversion between Neware column names and BDF labels and machine codes are impl
 - [ ] Add clone support in newaresql.clone
 - [ ] Add export support in newaresql.export.
 - [ ] Add explorative dashboard. 
+- [ ] Add BDF conversion to `get_tests` as well.  
