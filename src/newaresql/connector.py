@@ -3,7 +3,7 @@ from __future__ import annotations
 import concurrent.futures
 import os
 from functools import cache
-from typing import Literal, Self
+from typing import Self
 
 import polars as pl
 import sqlalchemy as sa
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from newaresql import bdf, transformations
 from newaresql.defaults import JOIN, NAMING, TRANSFORM
 from newaresql.schemas import get_data_schema
-from newaresql.types import Columns, Conditions, Naming, Test
+from newaresql.types import Columns, Conditions, Join, Naming, Test
 
 
 def build_conditions(conditions: Conditions) -> sa.ColumnElement[bool]:
@@ -109,6 +109,7 @@ class Connector:
     ):
         """
         Wraps pl.read_database
+        pl.read_database(query, connection=connection, schema_overrides=schema, **options)
         """
         if isinstance(query, str):
             query = sa.text(query)
@@ -136,16 +137,21 @@ class Connector:
         self,
         *tables,
         columns: Columns | None = None,
-        conditions: Conditions | None = None,
+        conditions: Conditions | list[Conditions | None] | None = None,
     ) -> sa.Select | sa.CompoundSelect:
         if len(tables) == 0:
             raise ValueError("At least one table must be specified")
         elif len(tables) == 1:
+            if isinstance(conditions, list):
+                conditions = conditions[0]
+
             return self.select_table(tables[0], columns=columns, conditions=conditions)
         else:
+            if not isinstance(conditions, list):
+                conditions = [conditions] * len(tables)
             stmts = [
-                self.select_table(table, columns=columns, conditions=conditions)
-                for table in tables
+                self.select_table(table, columns=columns, conditions=cond)
+                for table, cond in zip(tables, conditions)
             ]
             return sa.union_all(*stmts)
 
@@ -166,7 +172,7 @@ class Connector:
         self,
         *tables,
         columns: Columns | None = None,
-        conditions: Conditions | None = None,
+        conditions: Conditions | list[Conditions | None] | None = None,
         **options,
     ) -> pl.DataFrame:
         """
@@ -189,22 +195,31 @@ class Connector:
         if conditions is None:
             conditions = {}
 
-        conditions = dict(
-            **conditions,
-            unit_id=test["unit_id"],
-            chl_id=test["chl_id"],
-            test_id=test["test_id"],
-        )
         if test["main_second_table"] is None:
             stmt = self.select_table(
-                test["main_first_table"], columns=columns, conditions=conditions
+                test["main_first_table"],
+                columns=columns,
+                conditions={
+                    **conditions,
+                    "unit_id": test["unit_id"],
+                    "chl_id": test["chl_id"],
+                    "test_id": test["test_id"],
+                },
             )
         else:
             stmt = self.select_tables(
                 test["main_first_table"],
                 test["main_second_table"],
                 columns=columns,
-                conditions=conditions,
+                conditions=[
+                    {
+                        **conditions,
+                        "unit_id": test["unit_id"],
+                        "chl_id": test["chl_id"],
+                        "test_id": test["test_id"],
+                    },
+                    conditions,
+                ],
             )
         return stmt
 
@@ -221,12 +236,6 @@ class Connector:
 
         if conditions is None:
             conditions = {}
-        conditions = dict(
-            **conditions,
-            unit_id=test["unit_id"],
-            chl_id=test["chl_id"],
-            test_id=test["test_id"],
-        )
 
         if (test["aux_first_table"] is None) and (test["aux_second_table"] is None):
             stmt = None
@@ -234,20 +243,37 @@ class Connector:
             test["aux_second_table"] is None
         ):
             stmt = self.select_table(
-                test["aux_first_table"], columns=columns, conditions=conditions
+                test["aux_first_table"],
+                columns=columns,
+                conditions={
+                    **conditions,
+                    "unit_id": test["unit_id"],
+                    "chl_id": test["chl_id"],
+                    "test_id": test["test_id"],
+                },
             )
         elif (test["aux_first_table"] is None) and (
             test["aux_second_table"] is not None
         ):
             stmt = self.select_table(
-                test["aux_second_table"], columns=columns, conditions=conditions
+                test["aux_second_table"],
+                columns=columns,
+                conditions=conditions,
             )
         else:
             stmt = self.select_tables(
                 test["aux_first_table"],
                 test["aux_second_table"],
                 columns=columns,
-                conditions=conditions,
+                conditions=[
+                    {
+                        **conditions,
+                        "unit_id": test["unit_id"],
+                        "chl_id": test["chl_id"],
+                        "test_id": test["test_id"],
+                    },
+                    conditions,
+                ],
             )
         return stmt
 
@@ -265,13 +291,23 @@ class Connector:
             aux_conditions = None
         else:
             main_conditions = {
-                col: value for col, value in conditions.items() if col in main_columns
+                col: value
+                for col, value in conditions.items()
+                if col in schemas["main"]
             }
             aux_conditions = {
-                col: value for col, value in conditions.items() if col in aux_columns
+                col: value for col, value in conditions.items() if col in schemas["aux"]
             }
-        main_stmt = self.select_main(test, conditions=main_conditions)
-        aux_stmt = self.select_aux(test, conditions=aux_conditions)
+        main_stmt = self.select_main(
+            test,
+            columns=main_columns,
+            conditions=main_conditions,
+        )
+        aux_stmt = self.select_aux(
+            test,
+            columns=aux_columns,
+            conditions=aux_conditions,
+        )
 
         if aux_stmt is None:
             data_stmt = main_stmt
@@ -302,14 +338,12 @@ class Connector:
         schema = get_data_schema(self.get_version(), test["dev_uid"])["main"]
         if columns is None:
             columns = list(schema.keys())
-        schema = {col: typ for col, typ in schema.items() if col in columns}
         stmt = self.select_main(test, columns=columns, conditions=conditions)
-        main = self.query(stmt, **options).cast(schema)
+        main = self.query(stmt, **options).cast(
+            {col: typ for col, typ in schema.items() if col in columns}
+        )
         if transform:
             main = transformations.transform(main, self.get_version(), test["dev_uid"])
-        main = main.cast(
-            {col: typ for col, typ in schema.items() if col in main.columns}
-        )
         return bdf.convert(main, "bts", naming)
 
     def get_aux(
@@ -324,12 +358,15 @@ class Connector:
         schema = get_data_schema(self.get_version(), test["dev_uid"])["aux"]
         if columns is None:
             columns = list(schema.keys())
-        schema = {col: typ for col, typ in schema.items() if col in columns}
         stmt = self.select_aux(test, columns=columns, conditions=conditions)
         if stmt is None:
-            aux = pl.DataFrame(schema=schema)
+            aux = pl.DataFrame(
+                schema={col: typ for col, typ in schema.items() if col in columns}
+            )
         else:
-            aux = self.query(stmt, **options).cast(schema)
+            aux = self.query(stmt, **options).cast(
+                {col: typ for col, typ in schema.items() if col in columns}
+            )
         if transform:
             aux = transformations.transform(aux, self.get_version(), test["dev_uid"])
 
@@ -403,7 +440,12 @@ class Connector:
                 *main_subquery.c,
                 *(column for column in aux_subquery.c if column.name != "seq_id"),
             ).select_from(data_join)
-        return self.query(data_stmt, **options)
+        schemas = get_data_schema(self.get_version(), test["dev_uid"])
+        schema = {**schemas["main"], **schemas["aux"]}
+        data = self.query(data_stmt, **options)
+        return data.cast(
+            {col: typ for col, typ in schema.items() if col in data.columns}
+        )
 
     def get_data(
         self,
@@ -411,7 +453,7 @@ class Connector:
         conditions: Conditions | None = None,
         naming: Naming = NAMING,
         transform: bool = TRANSFORM,
-        join: Literal["database", "local"] = JOIN,
+        join: Join = JOIN,
         **options,
     ) -> pl.DataFrame:
         schemas = get_data_schema(self.get_version(), test["dev_uid"])
@@ -423,14 +465,18 @@ class Connector:
             aux_conditions = None
         else:
             main_conditions = {
-                col: value for col, value in conditions.items() if col in main_columns
+                col: value
+                for col, value in conditions.items()
+                if col in schemas["main"]
             }
             aux_conditions = {
-                col: value for col, value in conditions.items() if col in aux_columns
+                col: value for col, value in conditions.items() if col in schemas["aux"]
             }
         if join == "database":
             data = self._get_data_database(
                 test=test,
+                main_columns=main_columns,
+                aux_columns=aux_columns,
                 main_conditions=main_conditions,
                 aux_conditions=aux_conditions,
                 **options,
@@ -438,6 +484,8 @@ class Connector:
         elif join == "local":
             data = self._get_data_local(
                 test=test,
+                main_columns=main_columns,
+                aux_columns=aux_columns,
                 main_conditions=main_conditions,
                 aux_conditions=aux_conditions,
                 **options,
@@ -457,18 +505,23 @@ class Connector:
         - record_count: MAX(seq_id)
         - cycle_count: MAX(cycle)
         """
-
-        table = self.select_table(
-            test["main_second_table"] or test["main_first_table"],
-            conditions={
+        if test["main_second_table"] is None:
+            table = test["main_first_table"]
+            conditions = {
                 "unit_id": test["unit_id"],
                 "chl_id": test["chl_id"],
                 "test_id": test["test_id"],
-            },
+            }
+        else:
+            table = test["main_second_table"]
+            conditions = None
+
+        t = self.select_table(
+            table, columns=["seq_id", "cycle"], conditions=conditions
         ).subquery()
         stmt = sa.select(
-            sa.func.max(table.c["seq_id"]).label("record_count"),
-            sa.func.max(table.c["cycle"]).label("cycle_count"),
+            sa.func.max(t.c["seq_id"]).label("record_count"),
+            sa.func.max(t.c["cycle"]).label("cycle_count"),
         )
         result = self.query(stmt)
         return result.to_dicts()[0]
