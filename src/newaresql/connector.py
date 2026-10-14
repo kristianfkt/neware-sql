@@ -14,9 +14,28 @@ from newaresql.schemas import get_data_schema
 from newaresql.types import Columns, Conditions, Join, Naming, Test
 
 
+def conditions_to_bts(conditions: Conditions) -> Conditions:
+    """
+    User inputs any condition - which must be named according to the BTS schema.
+    This function converts user-friendly condition names to the corresponding BTS column names.
+    """
+    bts_conditions = {}
+    codes = {field.code: field.bts for field in bdf.FIELDS}
+    labels = {field.label: field.bts for field in bdf.FIELDS}
+    for col, cond in conditions.items():
+        if col in codes:
+            bts_conditions[codes[col]] = cond
+        elif col in labels:
+            bts_conditions[labels[col]] = cond
+        else:
+            bts_conditions[col] = cond
+    return bts_conditions
+
+
 def build_conditions(conditions: Conditions) -> sa.ColumnElement[bool]:
     clauses = []
-    for col, cond in conditions.items():
+
+    for col, cond in conditions_to_bts(conditions).items():
         if isinstance(cond, list):
             clauses.append(sa.column(col).in_(cond))
         elif isinstance(cond, tuple) and len(cond) == 2:
@@ -318,6 +337,7 @@ class Connector:
                 main_subquery,
                 aux_subquery,
                 main_subquery.c.seq_id == aux_subquery.c.seq_id,
+                isouter=True,
             )
             data_stmt = sa.select(
                 *main_subquery.c,
