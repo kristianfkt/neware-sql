@@ -1,17 +1,18 @@
 import datetime
-from typing import Any, Literal, TypeAlias
+from typing import Any, Literal
 
-Scalar: TypeAlias = int | float | str | bool | datetime.datetime | datetime.date
-Equal: TypeAlias = Scalar
-In: TypeAlias = list[Scalar]
-Between: TypeAlias = tuple[Scalar, Scalar]
-LessOrEqual: TypeAlias = tuple[None, Scalar]
-GreaterOrEqual: TypeAlias = tuple[Scalar, None]
+Scalar = int | float | str | bool | datetime.datetime | datetime.date
+Equal = Scalar
+In = list[Scalar]
+Between = tuple[Scalar, Scalar]
+LessOrEqual = tuple[None, Scalar]
+GreaterOrEqual = tuple[Scalar, None]
 
-Condition: TypeAlias = Equal | In | Between | LessOrEqual | GreaterOrEqual
-Conditions: TypeAlias = dict[str, Condition]
+Condition = Equal | In | Between | LessOrEqual | GreaterOrEqual
+Conditions = dict[str, Condition]
 
 
-Test: TypeAlias = dict[str, Any]
-Naming: TypeAlias = Literal["bts", "code", "label"]
-Columns: TypeAlias = str | list[str]
+Test = dict[str, Any]
+Naming = Literal["bts", "code", "label"]
+Columns = str | list[str]
+Join = Literal["database", "local"]
