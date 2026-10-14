@@ -14,27 +14,28 @@ The actual connection is handled by an SQLAlchemy engine.
 Credentials must be provided explicitly, or made availabe as enviroment variables on the form `BTS_HOST`, `BTS_PORT`, *etc*.  
 
 
-## Simple example
-The preffered way is the establish a re-useable connection ... 
-
-```
-import newaresql.bts as bts
-
-credentials = dict(host=..., port=..., username=..., password=..., database=...)
-
-with bts.connect(**credentials): as connection:
-    tests = newaresql.list_tests(connection=connection)
-    data = newaresql.get_data(tests[0], connection=connection)
-```
-
-but credentials can also be used-directly
+## Getting started
+With context management
 ```
 import newaresql
 
-credentials = dict(host=..., port=..., user=..., password=..., database=...)
+# newaresql will look for os.getenv(NEWARE_BTS_HOST), etc if credential is not supplied
+credentials = dict(host=..., port=..., username=..., password=..., database=...)
 
-tests = newaresql.list_tests(credentials=credentials)
-data = newaresql.get_data(tests[0], credentials=credentials)
+with newaresql.connect(**credentials): as connection:
+    tests = connection.list_tests()
+    data = connection.get_data(tests[0])
+```
+
+Or without
+```
+import newaresql
+
+# newaresql will look for os.getenv(NEWARE_BTS_HOST), etc if credential is not supplied
+credentials = dict(host=..., port=..., username=..., password=..., database=...)
+
+tests = newaresql.list_tests(**credentials)
+data = newaresql.get_data(tests[0], **credentials)
 ```
 
 # Contributions needed
@@ -42,18 +43,22 @@ data = newaresql.get_data(tests[0], credentials=credentials)
 - Testing. Does it work for you? 
   
 # Code layout
-Database connectivity is implemented in `connect.py`, using SQLAlchemy's connection engine and `polars.read_database` to execute most queries.\
-In our experience, main- and auxillary data merge can be *excessively*  slow on the server side.\
-The connector therefore implements `get_main_data()` and `get_aux_data`, and `strean_main_data()` and `stream_aux_data` separately. The auxillary data table can also be twice the height of the main data tables, as is the case for type 26 devices with 2 auxillary channels. 
+The `Connector` class in `connector.py`  uses a SQLAlchemy's engine to handle connections and `polars.read_database` to execute queries.  
+The connector exposes methods
+ - `query(query,...)`: Passes a query along to pl.read_database 
+ - `list_tests()`: Returns a list of availalbe tests as dictionaries
+ - `get_tests()`: Returns a dataframe overview of availalbe tests
+ -  `get_main(test, ...)`: Fetches the `main` data, *i.e.* time-current-voltage derived data. 
+ -  `get_aux(test, ...)`: Fetches the `aux` data, *i.e.* temperature data.   
+ -  `get_data(test, ...)`: Fetches `main` and `aux` data merged.
+ -  `get_stats(test)`: Returns some test statistics as a dictionary.  
 
-Schemas of main- and aux data, *i.e* dictionaries of column names to python type, for different BTS-builds and device types are registered under `\schemas\`, and is used by the connector to ensure consistend data types when fetching the raw data.\
-Data transformations from Neware's integer values to actual measurements is implemented in `transform.py` for different BTS-server builds and device types.
+Data transformations and schemas for different BTS build versions and device types are implemented der `transformations/` and `schemas/`.  
 Conversion between Neware column names and BDF labels and machine codes are implemented in `bdf.py`.
 
-# TO-DO
-- Implement the SQL- and Blob sinks for clone
-- Implement the SQL- and Blob sinks for export
-- Separate main- and aux data export. 
-- Decide on metadata vs tests
-- Add a dashboard
-- The transformations *via* classes is overengineered. Replace with simple dict and a graph.  
+# TODO/Future: 
+- [ ] Move some functionality into namespace newaresql.bts - IF we extend the package with more functionality.
+- [ ] Add step- and cycle aggregation.
+- [ ] Add clone support in newaresql.clone
+- [ ] Add export support in newaresql.export.
+- [ ] Add explorative dashboard. 
