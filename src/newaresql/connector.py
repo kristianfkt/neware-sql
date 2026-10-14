@@ -15,9 +15,18 @@ from newaresql.types import Columns, Conditions, Join, Naming, Test
 
 
 def conditions_to_bts(conditions: Conditions) -> Conditions:
-    """
-    User inputs any condition - which must be named according to the BTS schema.
-    This function converts user-friendly condition names to the corresponding BTS column names.
+    """Convert BDF code names and labels in condition keys to BTS names.
+
+    Matching is case-sensitive. For example, ``cycle_count`` and
+    ``Cycle Count / 1`` both map to ``cycle``. Unknown keys pass through.
+    Values are unchanged: this does not convert units or derived fields.
+
+    Args:
+        conditions: Filters keyed by BTS names, BDF codes, or BDF labels.
+
+    Returns:
+        A new dictionary without modifying the input. If multiple keys map
+        to one BTS name, the last entry wins.
     """
     bts_conditions = {}
     codes = {field.code: field.bts for field in bdf.FIELDS}
@@ -33,6 +42,18 @@ def conditions_to_bts(conditions: Conditions) -> Conditions:
 
 
 def build_conditions(conditions: Conditions) -> sa.ColumnElement[bool]:
+    """Build AND-combined SQL predicates after normalizing condition names.
+
+    Args:
+        conditions: Filters using BTS names, BDF codes, or exact BDF labels.
+            Scalars specify equality, lists specify membership, and two-item
+            tuples specify inclusive bounds. A None endpoint omits that bound.
+            Values must use raw database units.
+
+    Returns:
+        A SQLAlchemy condition expression; a tuple with two None endpoints
+        contributes no predicate.
+    """
     clauses = []
 
     for col, cond in conditions_to_bts(conditions).items():
@@ -301,6 +322,19 @@ class Connector:
         test: Test,
         conditions: Conditions | None = None,
     ) -> sa.Select | sa.CompoundSelect | None:
+        """Build a main/auxiliary query with a left join on seq_id.
+
+        Args:
+            test: Test metadata identifying the main and auxiliary tables.
+            conditions: Filters using BTS names, BDF codes, or exact BDF
+                labels, such as {"Cycle Count / 1": (4, 100)}. Names are
+                normalized before routing filters to each schema. Keys absent
+                from both schemas are ignored. Values use raw database units.
+
+        Returns:
+            A SQLAlchemy query, using only main data if no auxiliary table
+            exists. No query is executed.
+        """
         schemas = get_data_schema(self.get_version(), test["dev_uid"])
         main_columns = list(schemas["main"].keys())
         main_columns.remove("test_tmp")
@@ -309,6 +343,7 @@ class Connector:
             main_conditions = None
             aux_conditions = None
         else:
+            conditions = conditions_to_bts(conditions)
             main_conditions = {
                 col: value
                 for col, value in conditions.items()
@@ -476,6 +511,29 @@ class Connector:
         join: Join = JOIN,
         **options,
     ) -> pl.DataFrame:
+        """Fetch and join main and auxiliary data for a test.
+
+        Args:
+            test: Test metadata identifying the data tables.
+            conditions: Filters using BTS names, BDF codes, or exact BDF
+                labels. For example, {"Cycle Count / 1": (4, 100)} selects
+                inclusive cycle bounds. Names are normalized before schema
+                filtering; keys absent from both schemas are ignored. Values
+                use raw database units, regardless of transform or naming.
+            naming: Output column convention: "bts", "code", or "label".
+            transform: Apply version/device-specific transformations after
+                fetching and joining the data.
+            join: "database" for a SQL join or "local" for parallel fetches
+                followed by a Polars left join.
+            **options: Additional arguments forwarded to the selected fetch
+                path. The database path also forwards them to SQL selectors.
+
+        Returns:
+            Joined data with the requested transformations and column naming.
+
+        Raises:
+            ValueError: If join is not "database" or "local".
+        """
         schemas = get_data_schema(self.get_version(), test["dev_uid"])
         main_columns = list(schemas["main"].keys())
         main_columns.remove("test_tmp")
@@ -484,6 +542,7 @@ class Connector:
             main_conditions = None
             aux_conditions = None
         else:
+            conditions = conditions_to_bts(conditions)
             main_conditions = {
                 col: value
                 for col, value in conditions.items()
