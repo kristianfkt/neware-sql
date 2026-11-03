@@ -1,133 +1,85 @@
-import itertools
-import logging
-from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, TypedDict
 
 import polars as pl
 
-logger = logging.getLogger(__name__)
-
-# ==============
-# We could probably autogenerate these fields from a json file or something
-# ==============
+Naming = Literal["bts", "code", "label"]
+DEFAULT = "label"
 
 
-@dataclass(frozen=True, unsafe_hash=True)
-class Field:
+class Column(TypedDict):
     """
-    Mapping of a column in a bts database to its label and code representation.
-    Attributes:
-        bts (str): The name of the column in the BTS database.
-        label (str): The human-readable label for the column.
-        code (str): The code representation for the column.
-        mapping (dict[str, str]): A dictionary mapping "bts", "label", and "code" to their respective values.
+    Columns representing the metadata of a column in the dataset.
     """
 
     bts: str
-    label: str
     code: str
-
-    def __getitem__(self, key: str) -> str:
-        return getattr(self, key)
+    label: str
 
 
-DATA_FIELDS = []  # Timeseries data fields
-STEP_FIELDS = []  # Step-level data fields
-
-# Counters and indexes
-DATA_FIELDS += [
-    Field(bts="step_id", label="Step ID / 1", code="step_id"),
-    Field(bts="step_type", label="Step Type / 1", code="step_type"),
-    Field(bts="step_index", label="Step Index / 1", code="step_index"),
-    Field(bts="seq_id", label="Record Count / 1", code="record_count"),
-    Field(bts="step_count", label="Step Count / 1", code="step_count"),
-    Field(bts="cycle", label="Cycle Count / 1", code="cycle_count"),
-    Field(bts="auxchl_id", label="Aux Channel ID / 1", code="aux_channel_id"),
-]
-
-# Time
-DATA_FIELDS += [
-    Field(bts="unix_time", label="Unix Time / s", code="unix_time"),
-    Field(bts="test_atime", label="Time / datetime", code="time_datetime"),
-    Field(bts="test_time", label="Step Time / s", code="step_time"),
-    Field(bts="test_totaltime", label="Test Time / s", code="total_time"),
-]
-
-# Timeseries data
-DATA_FIELDS += [
-    Field(bts="test_vol", label="Voltage / V", code="voltage_volt"),
-    Field(bts="test_cur", label="Current / A", code="current_ampere"),
-    Field(bts="test_tmp", label="Temperature / degC", code="temperature_celsius"),
-    Field(bts="test_pow", label="Power / W", code="power_watt"),
-]
-
-# Integral data
-DATA_FIELDS += [
-    Field(
+columns = [
+    Column(bts="dev_uid", code="device_uid", label="Device UID / 1"),
+    Column(bts="unit_id", code="unit_id", label="Unit ID / 1"),
+    Column(bts="chl_id", code="channel_id", label="Channel ID / 1"),
+    Column(bts="test_id", code="test_id", label="Test ID / 1"),
+    Column(bts="step_id", code="step_id", label="Step ID / 1"),
+    Column(bts="step_type", code="step_type", label="Step Type / 1"),
+    Column(bts="step_index", code="step_index", label="Step Index / 1"),
+    Column(bts="seq_id", code="record_count", label="Record Count / 1"),
+    Column(bts="step_count", code="step_count", label="Step Count / 1"),
+    Column(bts="cycle", code="cycle_count", label="Cycle Count / 1"),
+    Column(bts="auxchl_id", code="aux_channel_id", label="Aux Channel ID / 1"),
+    Column(bts="unix_time", code="unix_time", label="Unix Time / s"),
+    Column(bts="test_atime", code="time_datetime", label="Time / datetime"),
+    Column(bts="test_time", code="step_time", label="Step Time / s"),
+    Column(bts="test_totaltime", code="total_time", label="Test Time / s"),
+    Column(bts="test_vol", code="voltage_volt", label="Voltage / V"),
+    Column(bts="test_cur", code="current_ampere", label="Current / A"),
+    Column(bts="test_tmp", code="temperature_celsius", label="Temperature / degC"),
+    Column(bts="test_pow", code="power_watt", label="Power / W"),
+    Column(
         bts="test_capchg",
-        label="Step Charging Capacity / Ah",
         code="step_charging_capacity_ah",
+        label="Step Charging Capacity / Ah",
     ),
-    Field(
+    Column(
         bts="test_capdchg",
-        label="Step Discharging Capacity / Ah",
         code="step_discharging_capacity_ah",
+        label="Step Discharging Capacity / Ah",
     ),
-    Field(
+    Column(
         bts="test_engchg",
-        label="Step Charging Energy / Wh",
         code="step_charging_energy_wh",
+        label="Step Charging Energy / Wh",
     ),
-    Field(
+    Column(
         bts="test_engdchg",
-        label="Step Discharging Energy / Wh",
         code="step_discharging_energy_wh",
+        label="Step Discharging Energy / Wh",
     ),
-    Field(
-        bts="test_cap",
-        label="Step Capacity / Ah",
-        code="step_capacity_ah",
-    ),
-    Field(
-        bts="test_eng",
-        label="Step Energy / Wh",
-        code="step_energy_wh",
-    ),
+    Column(bts="test_cap", code="step_capacity_ah", label="Step Capacity / Ah"),
+    Column(bts="test_eng", code="step_energy_wh", label="Step Energy / Wh"),
 ]
-
-FIELDS = list(set(DATA_FIELDS + STEP_FIELDS))
 
 MAPPINGS = {
-    (src, dst): {field[src]: field[dst] for field in FIELDS}
-    for src, dst in itertools.permutations(["bts", "code", "label"], 2)
+    (src, dst): {col[src]: col[dst] for col in columns}
+    for src in ["bts", "code", "label"]
+    for dst in ["bts", "code", "label"]
 }
+VALID = {"bts", "code", "label"}
 
 
 def convert(
     data: pl.DataFrame,
-    src: Literal["bts", "code", "label"] = "bts",
-    dst: Literal["bts", "code", "label"] = "label",
-) -> pl.DataFrame:
-    """
-    Convert the column names of a DataFrame.
-    src - source
-    dst - destination
-    Valid values for src and dst are: "bts", "code", "label"
-        bts - column names are kept as-is in the BTS MySQL database
-        code - column names are converted to the bdf code format, i.e. voltage_volt
-        label - column names are converted to the human-readable label, i.e. Voltage / V
-    """
-    valid = {"bts", "code", "label"}
-    if src not in valid:
-        raise ValueError(f"Invalid source: {src}. Valid values are: {valid}")
-    if dst not in valid:
-        raise ValueError(f"Invalid destination: {dst}. Valid values are: {valid}")
-
-    if src == dst:
+    source: Naming,
+    destination: Naming,
+):
+    if source not in VALID:
+        raise ValueError(f"Invalid source naming: {source}")
+    if destination not in VALID:
+        raise ValueError(f"Invalid destination naming: {destination}")
+    if source == destination:
         return data
 
-    mapping = MAPPINGS.get((src, dst))
-    if mapping is None:
-        raise ValueError(f"No mapping found for {src} to {dst}")
-    select = [d for s, d in mapping.items() if s in data.columns]
-    return data.rename(mapping, strict=False).select(*select)
+    mapping = MAPPINGS.get((source, destination), {})
+    mapping = {k: v for k, v in mapping.items() if k in data.columns}
+    return data.rename(mapping, strict=False)
