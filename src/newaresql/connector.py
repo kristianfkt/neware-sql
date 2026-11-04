@@ -1,3 +1,5 @@
+"""Database access and query construction for Neware BTS data."""
+
 from __future__ import annotations
 
 import concurrent.futures
@@ -75,12 +77,28 @@ def build_conditions(conditions: Conditions) -> sa.ColumnElement[bool]:
 
 
 def get_tests_0760(connector: Connector) -> pl.DataFrame:
+    """Fetch and join test metadata for BTS build 0760.
+
+    Args:
+        connector: Open connector used to fetch the source tables.
+
+    Returns:
+        Test metadata joined with test notes.
+    """
     test = connector.get_tables("test", "h_test")
     note = connector.get_table("test_note")
     return test.join(note, on=["dev_uid", "unit_id", "chl_id", "test_id"], how="left")
 
 
 def get_tests_0800(connector: Connector) -> pl.DataFrame:
+    """Fetch test metadata from the BTS 0800 test tables.
+
+    Args:
+        connector: Open connector used to discover and fetch the tables.
+
+    Returns:
+        Rows from the ``test`` table and all matching history tables.
+    """
     tables = ["test"]
     tables.extend(
         table for table in connector.list_tables() if table.startswith("h_test")
@@ -95,6 +113,8 @@ GET_TESTS = {
 
 
 class Connector:
+    """Manage a connection to a Neware BTS MySQL database."""
+
     def __init__(
         self,
         *,
@@ -104,6 +124,17 @@ class Connector:
         password: str | None = None,
         database: str | None = None,
     ):
+        """Create a connector and its SQLAlchemy engine.
+
+        Args:
+            host: Database host, falling back to ``NEWARE_BTS_HOST``.
+            port: Database port, falling back to ``NEWARE_BTS_PORT``.
+            username: Database username, falling back to
+                ``NEWARE_BTS_USERNAME``.
+            password: Database password, falling back to
+                ``NEWARE_BTS_PASSWORD``.
+            database: Database name, falling back to ``NEWARE_BTS_DATABASE``.
+        """
         self._host = host or os.getenv("NEWARE_BTS_HOST")
         self._port = port or os.getenv("NEWARE_BTS_PORT")
         self._username = username or os.getenv("NEWARE_BTS_USERNAME")
@@ -116,14 +147,31 @@ class Connector:
         return
 
     def __enter__(self) -> Self:
+        """Return this connector for use in a ``with`` statement.
+
+        Returns:
+            This connector.
+        """
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        """Dispose of the database engine when leaving a context manager.
+
+        Args:
+            exc_type: Exception type raised in the context, if any.
+            exc_val: Exception raised in the context, if any.
+            exc_tb: Traceback for the context exception, if any.
+        """
         self._engine.dispose()
         return
 
     @cache
     def get_version(self) -> str:
+        """Return the unique BTS build version reported by the database.
+
+        Raises:
+            ValueError: If the database reports zero or multiple versions.
+        """
         query = "SELECT DISTINCT version FROM db_ver"
         versions = self.query(query).select("version").to_series().unique().to_list()
         if len(versions) != 1:
@@ -133,12 +181,22 @@ class Connector:
         return str(versions[0])
 
     def list_tables(self) -> list[str]:
+        """Return the names of tables available in the database.
+
+        Returns:
+            Database table names.
+        """
         with self._engine.connect() as connection:
             return sa.inspect(connection).get_table_names()
 
     def get_tests(self) -> pl.DataFrame:
-        """
-        Returns a polars dataframe containing an overview of all tests available in the database.
+        """Fetch the test overview for the connected BTS build.
+
+        Returns:
+            A Polars DataFrame containing test metadata.
+
+        Raises:
+            ValueError: If the database version is unsupported.
         """
         version = self.get_version()
         if version not in GET_TESTS:
@@ -146,9 +204,10 @@ class Connector:
         return GET_TESTS[version](self)
 
     def list_tests(self) -> list[Test]:
-        """
-        Returns a list of dictionaries, each representing a test available in the database.
-        Wraps self.get_tests().to_dicts()
+        """Return each row of the test overview as a dictionary.
+
+        Returns:
+            Test metadata dictionaries.
         """
         return self.get_tests().to_dicts()
 
@@ -157,9 +216,15 @@ class Connector:
         query: str | sa.Selectable | sa.TextClause,
         **options,
     ):
-        """
-        Wraps pl.read_database
-        pl.read_database(query, connection=connection, schema_overrides=schema, **options)
+        """Execute a SQL query and return its results as a Polars DataFrame.
+
+        Args:
+            query: SQL string or SQLAlchemy selectable to execute.
+            **options: Additional keyword arguments forwarded to
+                ``polars.read_database``.
+
+        Returns:
+            Query results as a DataFrame.
         """
         if isinstance(query, str):
             query = sa.text(query)
@@ -172,16 +237,16 @@ class Connector:
         columns: Columns | None = None,
         conditions: Conditions | None = None,
     ) -> sa.Select:
-        """
-        Selects a table from the database with optional columns and conditions.
+        """Build a SELECT statement for one table.
 
-        Parameters:
-        - table: The name of the table to select.
-        - columns: Optional list of columns to include in the selection.
-        - conditions: Optional conditions to filter the selection.
+        Args:
+            table: Name of the database table.
+            columns: Optional column name or list of names to select. If
+                omitted, all table columns are selected.
+            conditions: Optional filters combined with AND.
 
         Returns:
-        - An SQLAlchemy Select object representing the query.
+            An SQLAlchemy ``Select`` statement.
         """
         t = sa.Table(table, sa.MetaData(), autoload_with=self._engine)
         if isinstance(columns, str):
@@ -200,16 +265,20 @@ class Connector:
         columns: Columns | None = None,
         conditions: Conditions | list[Conditions | None] | None = None,
     ) -> sa.Select | sa.CompoundSelect:
-        """
-        Selects multiple tables from the database with optional columns and conditions.
+        """Build a SELECT or UNION ALL statement for one or more tables.
 
-        Parameters:
-        - tables: The names of the tables to select.
-        - columns: Optional list of columns to include in the selection.
-        - conditions: Optional list of conditions to filter each table's selection.
+        Args:
+            *tables: Names of the database tables to select.
+            columns: Optional column name or list of names to select.
+            conditions: Optional filters shared by all tables, or one optional
+                filter mapping per table.
 
         Returns:
-        - An SQLAlchemy Select or CompoundSelect object representing the query.
+            A ``Select`` for one table or a ``CompoundSelect`` for multiple
+            tables.
+
+        Raises:
+            ValueError: If no table names are provided.
         """
         if len(tables) == 0:
             raise ValueError("At least one table must be specified")
@@ -237,16 +306,17 @@ class Connector:
         conditions: Conditions | None = None,
         **options,
     ) -> pl.DataFrame:
-        """
-        Fetches a table from the database with optional columns and conditions.
+        """Fetch a table as a Polars DataFrame.
 
-        Parameters:
-        - table: The name of the table to fetch.
-        - columns: Optional list of columns to include in the selection.
-        - conditions: Optional conditions to filter the selection.
+        Args:
+            table: Name of the database table.
+            columns: Optional column name or list of names to fetch.
+            conditions: Optional filters combined with AND.
+            **options: Additional keyword arguments forwarded to
+                ``polars.read_database``.
 
         Returns:
-        - A Polars DataFrame containing the fetched data.
+            The selected rows as a DataFrame.
         """
         stmt = self.select_table(table, columns=columns, conditions=conditions)
         return self.query(stmt, **options)
@@ -258,16 +328,18 @@ class Connector:
         conditions: Conditions | list[Conditions | None] | None = None,
         **options,
     ) -> pl.DataFrame:
-        """
-        Fetches multiple tables from the database via union all with optional columns and conditions.
+        """Fetch and combine one or more tables as a DataFrame.
 
-        Parameters:
-        - tables: The names of the tables to fetch.
-        - columns: Optional list of columns to include in the selection.
-        - conditions: Optional list of conditions to filter each table's selection.
+        Args:
+            *tables: Names of the database tables to fetch.
+            columns: Optional column name or list of names to fetch.
+            conditions: Optional filters shared by all tables, or one optional
+                filter mapping per table.
+            **options: Additional keyword arguments forwarded to
+                ``polars.read_database``.
 
         Returns:
-        - A Polars DataFrame containing the fetched data.
+            The selected rows as a DataFrame.
         """
         stmt = self.select_tables(*tables, columns=columns, conditions=conditions)
         return self.query(stmt, **options)
@@ -277,7 +349,15 @@ class Connector:
         test: Test,
         conditions: Conditions | None = None,
     ) -> tuple[sa.Select | sa.CompoundSelect, dict[str, type]]:
+        """Build a query and schema for a test's main measurement data.
 
+        Args:
+            test: Metadata identifying the test tables and database keys.
+            conditions: Optional filters applied to the selected rows.
+
+        Returns:
+            The SQL statement and its Polars schema overrides.
+        """
         schema = get_data_schema(self.get_version(), test["dev_uid"])["main"]
         columns = list(schema.keys())
 
@@ -314,7 +394,16 @@ class Connector:
         test: Test,
         conditions: Conditions | None = None,
     ) -> tuple[sa.Select | sa.CompoundSelect | None, dict[str, type]]:
+        """Build a query and schema for a test's auxiliary measurement data.
 
+        Args:
+            test: Metadata identifying the test tables and database keys.
+            conditions: Optional filters applied to the selected rows.
+
+        Returns:
+            The SQL statement, or ``None`` if the test has no auxiliary table,
+            and the corresponding schema overrides.
+        """
         schema = get_data_schema(self.get_version(), test["dev_uid"])["aux"]
         columns = list(schema.keys())
 
@@ -364,6 +453,15 @@ class Connector:
         test: Test,
         conditions: Conditions | None = None,
     ) -> pl.DataFrame:
+        """Fetch and transform a test's main measurements.
+
+        Args:
+            test: Metadata identifying the test tables and device type.
+            conditions: Optional filters applied before fetching.
+
+        Returns:
+            The transformed main measurements.
+        """
         stmt, schema = self.select_main_data(test, conditions=conditions)
         return transform_data(
             self.query(stmt, schema_overrides=schema),
@@ -376,6 +474,16 @@ class Connector:
         test: Test,
         conditions: Conditions | None = None,
     ) -> pl.DataFrame | None:
+        """Fetch and transform auxiliary measurements when available.
+
+        Args:
+            test: Metadata identifying the test tables and device type.
+            conditions: Optional filters applied before fetching.
+
+        Returns:
+            The transformed auxiliary measurements, or ``None`` if the test
+            has no auxiliary table.
+        """
         stmt, schema = self.select_aux_data(test, conditions=conditions)
         if stmt is None:
             return None
@@ -387,9 +495,14 @@ class Connector:
             )
 
     def get_step_count(self, test: Test):
-        """
-        Counts the steps of the test
-        Performs a ROW_NUMBER() count over cycle - step_id - step_changecount combination to determine the step count.
+        """Return distinct test steps with a sequential ``step_count`` column.
+
+        Args:
+            test: Metadata identifying the main test tables.
+
+        Returns:
+            A DataFrame with one row per distinct cycle, step ID, and change
+            count, ordered by those columns.
         """
         q1 = f"SELECT DISTINCT cycle, step_id, step_changecount FROM {test['main_first_table']} WHERE unit_id={test['unit_id']} AND chl_id={test['chl_id']} AND test_id={test['test_id']}"
         q2 = (
@@ -408,16 +521,26 @@ class Connector:
         )
 
     def get_first_atime(self, test: Test) -> datetime.datetime:
-        """
-        Fetches the first atime of the test.
+        """Return the earliest timestamp recorded for a test.
+
+        Args:
+            test: Metadata identifying the main test table and database keys.
+
+        Returns:
+            The earliest ``test_atime`` value.
         """
         query = f"SELECT MIN(test_atime) AS first_atime FROM {test['main_first_table']} WHERE unit_id={test['unit_id']} AND chl_id={test['chl_id']} AND test_id={test['test_id']}"
         result = self.query(query, schema_overrides={"first_atime": datetime.datetime})
         return result.select("first_atime").to_series().item()
 
     def get_record_count(self, test: Test):
-        """
-        Counts the records of the test in the main table.
+        """Return the maximum sequence ID recorded for a test.
+
+        Args:
+            test: Metadata identifying the main test tables and database keys.
+
+        Returns:
+            The maximum ``seq_id`` value.
         """
         if test["main_second_table"] is None:
             query = f"SELECT MAX(seq_id) AS record_count FROM {test['main_first_table']} WHERE unit_id={test['unit_id']} AND chl_id={test['chl_id']} AND test_id={test['test_id']}"
@@ -429,8 +552,13 @@ class Connector:
         return result.select("record_count").to_series().item()
 
     def get_cycle_count(self, test: Test):
-        """
-        Counts the cycles of the test in the main table.
+        """Return the maximum cycle number recorded for a test.
+
+        Args:
+            test: Metadata identifying the main test tables and database keys.
+
+        Returns:
+            The maximum ``cycle`` value.
         """
         if test["main_second_table"] is None:
             query = f"SELECT MAX(cycle) AS cycle_count FROM {test['main_first_table']} WHERE unit_id={test['unit_id']} AND chl_id={test['chl_id']} AND test_id={test['test_id']}"
@@ -440,8 +568,13 @@ class Connector:
         return result.select("cycle_count").to_series().item()
 
     def get_counts(self, test: Test) -> dict:
-        """
-        Fetches both the record count and cycle count for the test.
+        """Return the maximum record sequence and cycle values for a test.
+
+        Args:
+            test: Metadata identifying the main test tables and database keys.
+
+        Returns:
+            A dictionary with ``record_count`` and ``cycle_count`` values.
         """
         if test["main_second_table"] is None:
             query = f"SELECT MAX(seq_id) AS record_count, MAX(cycle) AS cycle_count FROM {test['main_first_table']} WHERE unit_id={test['unit_id']} AND chl_id={test['chl_id']} AND test_id={test['test_id']}"
@@ -459,6 +592,21 @@ class Connector:
         naming: bdf.Naming = bdf.DEFAULT,
         threaded: bool = False,
     ) -> TestData:
+        """Fetch, transform, and combine a test's main and auxiliary data.
+
+        Args:
+            test: Metadata identifying the test and its database tables.
+            conditions: Optional filters keyed by BTS names, BDF codes, or
+                exact BDF labels. Values use raw database units.
+            naming: Output naming convention for the returned ``TestData``.
+            threaded: Whether to fetch the data components concurrently.
+
+        Returns:
+            A ``TestData`` object containing main and optional auxiliary data.
+
+        Raises:
+            ValueError: If ``naming`` is not a supported convention.
+        """
         if naming not in bdf.VALID:
             raise ValueError(f"Invalid naming: {naming}")
         if conditions is None:

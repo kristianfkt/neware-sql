@@ -1,3 +1,5 @@
+"""Column type schemas for BTS 0800 device types 24 and 26."""
+
 import datetime
 
 main_24: dict[str, type] = {

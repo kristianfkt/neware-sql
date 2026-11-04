@@ -1,3 +1,5 @@
+"""Schema lookup for supported BTS build and device-type combinations."""
+
 import logging
 
 from newaresql.schemas import schemas_0760, schemas_0800
@@ -12,15 +14,17 @@ _SCHEMAS: dict[str, dict[str, dict[str, type]]] = {
 
 
 def get_data_schema(version: str, dev_uid: int) -> dict[str, dict[str, type]]:
-    """
-    Fetches the data schema (name-type mapping) for the given BTS build version and device UID.
+    """Return the main and auxiliary schemas for a device and BTS build.
 
     Args:
-        version (str): The BTS build version.
-        dev_uid (int): The device UID.
+        version: BTS build version.
+        dev_uid: Device UID whose leading digits identify the device type.
 
     Returns:
-        dict[str, dict[str, type]]: The data schema for the specified version and device.
+        A mapping with ``main`` and ``aux`` column-to-type schemas.
+
+    Raises:
+        ValueError: If the version and device type are unsupported.
     """
     logger.debug(f"Getting data schema for version {version} and device UID {dev_uid}")
 

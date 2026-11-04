@@ -1,3 +1,5 @@
+"""Polars transformation expressions for BTS device type 24."""
+
 from __future__ import annotations
 
 import polars as pl

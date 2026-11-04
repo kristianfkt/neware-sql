@@ -1,3 +1,5 @@
+"""Apply versioned transformations and build step and cycle aggregates."""
+
 import logging
 from typing import overload
 
@@ -11,10 +13,13 @@ logger = logging.getLogger(__name__)
 
 
 def get_dependencies(expression: pl.Expr) -> set[str]:
-    """
-    Fetch all dependencies for the given expression.
-        test_vol = test_vol / 10000 depends only on itself
-        test_pow = test_vol * test_cur depends on test_vol and test_cur
+    """Return the root column names referenced by an expression.
+
+    Args:
+        expression: Polars expression to inspect.
+
+    Returns:
+        The set of root column names used by the expression.
     """
     logger.debug("Getting dependencies for expression: %s", expression)
     dependencies = set(expression.meta.root_names())
@@ -25,12 +30,16 @@ def get_dependencies(expression: pl.Expr) -> set[str]:
 def check_dependencies(
     alias: str, expression: pl.Expr, data: pl.LazyFrame, waiting: set[str]
 ) -> bool:
-    """
-    Checks if all dependency requirements are satisfied:
-        No dependencies: returns True
+    """Check whether an expression's dependencies are available to apply.
 
-        Dependencies met: returns True
-        Dependencies not met: returns False
+    Args:
+        alias: Output column name assigned to the expression.
+        expression: Polars expression whose dependencies are checked.
+        data: Current lazy frame and its available schema.
+        waiting: Names of expressions that have not yet been applied.
+
+    Returns:
+        Whether the expression can be applied in the current pass.
     """
     logger.debug("Checking dependencies for expression: %s", alias)
     dependencies = get_dependencies(expression)
@@ -77,13 +86,34 @@ def apply_expressions(
     expressions: dict[str, pl.Expr],
     data: pl.LazyFrame | pl.DataFrame,
 ) -> pl.LazyFrame | pl.DataFrame:
-    """
-    Applies expressions recursively
+    """Apply expressions in dependency-ordered batches.
+
+    DataFrame inputs are evaluated eagerly; LazyFrame inputs remain lazy.
+    Expressions that depend on other pending expressions are deferred to a
+    later batch.
+
+    Args:
+        expressions: Mapping from output column names to Polars expressions.
+        data: Frame to which the expressions are applied.
+
+    Returns:
+        The frame with ready expressions applied. If no expressions are ready,
+        the current frame is returned unchanged.
     """
     if isinstance(data, pl.DataFrame):
         return apply_expressions(expressions, data.lazy()).collect()
 
     def _check(dependencies: set[str], pending: set[str], present: set[str]):
+        """Check whether dependencies are present and not still pending.
+
+        Args:
+            dependencies: Column names referenced by the expression.
+            pending: Output names of expressions not yet applied.
+            present: Column names already available in the input frame.
+
+        Returns:
+            Whether every dependency is available for this application pass.
+        """
         for dependency in dependencies:
             if dependency in pending:
                 return False
@@ -180,8 +210,15 @@ def transform_data(
     bts_version: str,
     dev_uid: int,
 ) -> pl.LazyFrame | pl.DataFrame:
-    """
-    Applies the required transformations to the data based on the BTS version and device UID.
+    """Apply transformations for a BTS build and device type.
+
+    Args:
+        data: Main or auxiliary measurement frame to transform.
+        bts_version: BTS build version.
+        dev_uid: Device UID used to determine the device type.
+
+    Returns:
+        The transformed frame, preserving eager or lazy input behavior.
     """
     if isinstance(data, pl.DataFrame):
         return transform_data(data.lazy(), bts_version, dev_uid).collect()
@@ -208,6 +245,16 @@ def aggregate_steps(
     bts_version: str,
     dev_uid: int,
 ) -> pl.DataFrame | pl.LazyFrame:
+    """Aggregate measurements by cycle and step.
+
+    Args:
+        data: Transformed measurement frame.
+        bts_version: BTS build version used to select aggregation expressions.
+        dev_uid: Device UID used to select the device type.
+
+    Returns:
+        Step-level aggregates, preserving eager or lazy input behavior.
+    """
     if isinstance(data, pl.DataFrame):
         return aggregate_steps(data.lazy(), bts_version, dev_uid).collect()
     expressions = steps.get_expressions(bts_version, dev_uid)
@@ -231,6 +278,16 @@ def aggregate_cycles(
     bts_version: str,
     dev_uid: int,
 ) -> pl.DataFrame | pl.LazyFrame:
+    """Aggregate measurements by cycle.
+
+    Args:
+        data: Transformed measurement frame.
+        bts_version: BTS build version used to select aggregation expressions.
+        dev_uid: Device UID used to select the device type.
+
+    Returns:
+        Cycle-level aggregates, preserving eager or lazy input behavior.
+    """
     if isinstance(data, pl.DataFrame):
         return aggregate_cycles(data.lazy(), bts_version, dev_uid).collect()
     expressions = cycles.get_expressions(bts_version, dev_uid)

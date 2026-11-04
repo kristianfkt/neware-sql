@@ -1,3 +1,5 @@
+"""Public convenience API for accessing Neware BTS test data."""
+
 import polars as pl
 
 import newaresql.bdf
@@ -13,6 +15,18 @@ def connect(
     password: str | None = None,
     database: str | None = None,
 ) -> Connector:
+    """Create a database connector.
+
+    Args:
+        host: Database host, or ``None`` to use the environment variable.
+        port: Database port, or ``None`` to use the environment variable.
+        username: Database username, or ``None`` to use the environment variable.
+        password: Database password, or ``None`` to use the environment variable.
+        database: Database name, or ``None`` to use the environment variable.
+
+    Returns:
+        A connector that can be used as a context manager.
+    """
     return Connector(
         host=host,
         port=port,
@@ -30,6 +44,20 @@ def list_tests(
     password: str | None = None,
     database: str | None = None,
 ) -> list[newaresql.types.Test]:
+    """List available tests.
+
+    Args:
+        connector: Existing connector to use. If omitted, one is created and
+            closed for this call.
+        host: Database host used when creating a connector.
+        port: Database port used when creating a connector.
+        username: Database username used when creating a connector.
+        password: Database password used when creating a connector.
+        database: Database name used when creating a connector.
+
+    Returns:
+        Test metadata dictionaries.
+    """
     if connector is None:
         with connect(
             host=host,
@@ -50,6 +78,20 @@ def get_tests(
     password: str | None = None,
     database: str | None = None,
 ) -> pl.DataFrame:
+    """Fetch the available-test overview as a Polars DataFrame.
+
+    Args:
+        connector: Existing connector to use. If omitted, one is created and
+            closed for this call.
+        host: Database host used when creating a connector.
+        port: Database port used when creating a connector.
+        username: Database username used when creating a connector.
+        password: Database password used when creating a connector.
+        database: Database name used when creating a connector.
+
+    Returns:
+        A DataFrame containing metadata for available tests.
+    """
     if connector is None:
         with connect(
             host=host,
@@ -77,9 +119,23 @@ def get_data(
     password: str | None = None,
     database: str | None = None,
 ) -> TestData:
-    """
-    Connector OR credentials must be provided to fetch the test data.
-    A supplied connector takes precedence over the individual credentials.
+    """Fetch and transform data for a test.
+
+    Args:
+        test: Metadata for the test to fetch.
+        conditions: Optional filters applied to the main and auxiliary data.
+        naming: Output column naming convention.
+        threaded: Whether to fetch data components concurrently.
+        connector: Existing connector to use. When supplied, it takes
+            precedence over the individual credentials.
+        host: Database host used when creating a connector.
+        port: Database port used when creating a connector.
+        username: Database username used when creating a connector.
+        password: Database password used when creating a connector.
+        database: Database name used when creating a connector.
+
+    Returns:
+        A ``TestData`` object containing the fetched data.
     """
     if connector is None:
         with connect(

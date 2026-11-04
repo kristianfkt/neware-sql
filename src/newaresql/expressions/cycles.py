@@ -1,3 +1,5 @@
+"""Polars expressions used to aggregate measurements by cycle."""
+
 import polars as pl
 
 CYCLES = {
@@ -28,4 +30,13 @@ CYCLES = {
 
 
 def get_expressions(bts_build: str, dev_uid: int) -> dict[str, pl.Expr]:
+    """Return the cycle aggregation expressions.
+
+    Args:
+        bts_build: BTS build version, accepted for the shared provider API.
+        dev_uid: Device UID, accepted for the shared provider API.
+
+    Returns:
+        A mapping of cycle aggregate names to Polars expressions.
+    """
     return CYCLES

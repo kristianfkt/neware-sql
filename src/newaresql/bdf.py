@@ -1,3 +1,5 @@
+"""Column metadata and conversion between BTS and BDF naming conventions."""
+
 from typing import Literal, TypedDict
 
 import polars as pl
@@ -9,9 +11,7 @@ DEFAULT: Naming = "label"
 
 
 class Column(TypedDict):
-    """
-    Columns representing the metadata of a column in the dataset.
-    """
+    """Names for a dataset column in BTS, BDF code, and BDF label forms."""
 
     bts: str
     code: str
@@ -89,6 +89,20 @@ def convert(
     source: Naming,
     destination: Naming,
 ):
+    """Convert mapped DataFrame columns to another naming convention.
+
+    Args:
+        data: DataFrame whose columns use the source convention.
+        source: Naming convention currently used by the columns.
+        destination: Naming convention to use in the returned frame.
+
+    Returns:
+        The input frame when both conventions match; otherwise, a renamed
+        frame containing columns with known mappings.
+
+    Raises:
+        ValueError: If either naming convention is unsupported.
+    """
     if source not in VALID:
         raise ValueError(f"Invalid source naming: {source}")
     if destination not in VALID:
