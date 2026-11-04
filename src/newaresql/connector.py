@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import datetime
 import os
 from functools import cache
 from typing import Self
@@ -8,10 +9,11 @@ from typing import Self
 import polars as pl
 import sqlalchemy as sa
 
-from newaresql import bdf, transformations
-from newaresql.defaults import JOIN, NAMING, TRANSFORM
+import newaresql.bdf as bdf
+from newaresql.data import TestData
+from newaresql.expressions import transform_data
 from newaresql.schemas import get_data_schema
-from newaresql.types import Columns, Conditions, Join, Naming, Test
+from newaresql.types import Columns, Conditions, Test
 
 
 def conditions_to_bts(conditions: Conditions) -> Conditions:
@@ -29,8 +31,8 @@ def conditions_to_bts(conditions: Conditions) -> Conditions:
         to one BTS name, the last entry wins.
     """
     bts_conditions = {}
-    codes = {field.code: field.bts for field in bdf.FIELDS}
-    labels = {field.label: field.bts for field in bdf.FIELDS}
+    codes = {field["code"]: field["bts"] for field in bdf.COLUMNS}
+    labels = {field["label"]: field["bts"] for field in bdf.COLUMNS}
     for col, cond in conditions.items():
         if col in codes:
             bts_conditions[codes[col]] = cond
@@ -118,6 +120,7 @@ class Connector:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self._engine.dispose()
+        return
 
     @cache
     def get_version(self) -> str:
@@ -134,12 +137,19 @@ class Connector:
             return sa.inspect(connection).get_table_names()
 
     def get_tests(self) -> pl.DataFrame:
+        """
+        Returns a polars dataframe containing an overview of all tests available in the database.
+        """
         version = self.get_version()
         if version not in GET_TESTS:
             raise ValueError(f"No get_tests function for version {version}")
         return GET_TESTS[version](self)
 
-    def list_tests(self) -> list[dict]:
+    def list_tests(self) -> list[Test]:
+        """
+        Returns a list of dictionaries, each representing a test available in the database.
+        Wraps self.get_tests().to_dicts()
+        """
         return self.get_tests().to_dicts()
 
     def query(
@@ -162,6 +172,17 @@ class Connector:
         columns: Columns | None = None,
         conditions: Conditions | None = None,
     ) -> sa.Select:
+        """
+        Selects a table from the database with optional columns and conditions.
+
+        Parameters:
+        - table: The name of the table to select.
+        - columns: Optional list of columns to include in the selection.
+        - conditions: Optional conditions to filter the selection.
+
+        Returns:
+        - An SQLAlchemy Select object representing the query.
+        """
         t = sa.Table(table, sa.MetaData(), autoload_with=self._engine)
         if isinstance(columns, str):
             columns = [columns]
@@ -179,6 +200,17 @@ class Connector:
         columns: Columns | None = None,
         conditions: Conditions | list[Conditions | None] | None = None,
     ) -> sa.Select | sa.CompoundSelect:
+        """
+        Selects multiple tables from the database with optional columns and conditions.
+
+        Parameters:
+        - tables: The names of the tables to select.
+        - columns: Optional list of columns to include in the selection.
+        - conditions: Optional list of conditions to filter each table's selection.
+
+        Returns:
+        - An SQLAlchemy Select or CompoundSelect object representing the query.
+        """
         if len(tables) == 0:
             raise ValueError("At least one table must be specified")
         elif len(tables) == 1:
@@ -188,7 +220,10 @@ class Connector:
             return self.select_table(tables[0], columns=columns, conditions=conditions)
         else:
             if not isinstance(conditions, list):
-                conditions = [conditions] * len(tables)
+                conditions = [
+                    None if conditions is None else dict(conditions)
+                    for _ in range(len(tables))
+                ]
             stmts = [
                 self.select_table(table, columns=columns, conditions=cond)
                 for table, cond in zip(tables, conditions)
@@ -203,7 +238,15 @@ class Connector:
         **options,
     ) -> pl.DataFrame:
         """
-        Fetches a table
+        Fetches a table from the database with optional columns and conditions.
+
+        Parameters:
+        - table: The name of the table to fetch.
+        - columns: Optional list of columns to include in the selection.
+        - conditions: Optional conditions to filter the selection.
+
+        Returns:
+        - A Polars DataFrame containing the fetched data.
         """
         stmt = self.select_table(table, columns=columns, conditions=conditions)
         return self.query(stmt, **options)
@@ -216,31 +259,34 @@ class Connector:
         **options,
     ) -> pl.DataFrame:
         """
-        Fetches multiple tables via union all
+        Fetches multiple tables from the database via union all with optional columns and conditions.
+
+        Parameters:
+        - tables: The names of the tables to fetch.
+        - columns: Optional list of columns to include in the selection.
+        - conditions: Optional list of conditions to filter each table's selection.
+
+        Returns:
+        - A Polars DataFrame containing the fetched data.
         """
         stmt = self.select_tables(*tables, columns=columns, conditions=conditions)
         return self.query(stmt, **options)
 
-    def select_main(
+    def select_main_data(
         self,
         test: Test,
-        columns: Columns | None = None,
         conditions: Conditions | None = None,
-    ) -> sa.Select | sa.CompoundSelect:
+    ) -> tuple[sa.Select | sa.CompoundSelect, dict[str, type]]:
 
         schema = get_data_schema(self.get_version(), test["dev_uid"])["main"]
-        if columns is None:
-            columns = list(schema.keys())
-
-        if conditions is None:
-            conditions = {}
+        columns = list(schema.keys())
 
         if test["main_second_table"] is None:
             stmt = self.select_table(
                 test["main_first_table"],
                 columns=columns,
                 conditions={
-                    **conditions,
+                    **(conditions or {}),
                     "unit_id": test["unit_id"],
                     "chl_id": test["chl_id"],
                     "test_id": test["test_id"],
@@ -253,7 +299,7 @@ class Connector:
                 columns=columns,
                 conditions=[
                     {
-                        **conditions,
+                        **(conditions or {}),
                         "unit_id": test["unit_id"],
                         "chl_id": test["chl_id"],
                         "test_id": test["test_id"],
@@ -261,24 +307,20 @@ class Connector:
                     conditions,
                 ],
             )
-        return stmt
+        return stmt, schema
 
-    def select_aux(
+    def select_aux_data(
         self,
         test: Test,
-        columns: Columns | None = None,
         conditions: Conditions | None = None,
-    ) -> sa.Select | sa.CompoundSelect | None:
+    ) -> tuple[sa.Select | sa.CompoundSelect | None, dict[str, type]]:
 
         schema = get_data_schema(self.get_version(), test["dev_uid"])["aux"]
-        if columns is None:
-            columns = list(schema.keys())
-
-        if conditions is None:
-            conditions = {}
+        columns = list(schema.keys())
 
         if (test["aux_first_table"] is None) and (test["aux_second_table"] is None):
             stmt = None
+
         elif (test["aux_first_table"] is not None) and (
             test["aux_second_table"] is None
         ):
@@ -286,7 +328,7 @@ class Connector:
                 test["aux_first_table"],
                 columns=columns,
                 conditions={
-                    **conditions,
+                    **(conditions or {}),
                     "unit_id": test["unit_id"],
                     "chl_id": test["chl_id"],
                     "test_id": test["test_id"],
@@ -298,7 +340,7 @@ class Connector:
             stmt = self.select_table(
                 test["aux_second_table"],
                 columns=columns,
-                conditions=conditions,
+                conditions=conditions or {},
             )
         else:
             stmt = self.select_tables(
@@ -307,7 +349,7 @@ class Connector:
                 columns=columns,
                 conditions=[
                     {
-                        **conditions,
+                        **(conditions or {}),
                         "unit_id": test["unit_id"],
                         "chl_id": test["chl_id"],
                         "test_id": test["test_id"],
@@ -315,292 +357,174 @@ class Connector:
                     conditions,
                 ],
             )
-        return stmt
+        return stmt, schema
 
-    def select_data(
+    def get_main_data(
         self,
         test: Test,
         conditions: Conditions | None = None,
-    ) -> sa.Select | sa.CompoundSelect | None:
-        """Build a main/auxiliary query with a left join on seq_id.
-
-        Args:
-            test: Test metadata identifying the main and auxiliary tables.
-            conditions: Filters using BTS names, BDF codes, or exact BDF
-                labels, such as {"Cycle Count / 1": (4, 100)}. Names are
-                normalized before routing filters to each schema. Keys absent
-                from both schemas are ignored. Values use raw database units.
-
-        Returns:
-            A SQLAlchemy query, using only main data if no auxiliary table
-            exists. No query is executed.
-        """
-        schemas = get_data_schema(self.get_version(), test["dev_uid"])
-        main_columns = list(schemas["main"].keys())
-        main_columns.remove("test_tmp")
-        aux_columns = ["seq_id", "auxchl_id", "test_tmp"]
-        if conditions is None:
-            main_conditions = None
-            aux_conditions = None
-        else:
-            conditions = conditions_to_bts(conditions)
-            main_conditions = {
-                col: value
-                for col, value in conditions.items()
-                if col in schemas["main"]
-            }
-            aux_conditions = {
-                col: value for col, value in conditions.items() if col in schemas["aux"]
-            }
-        main_stmt = self.select_main(
-            test,
-            columns=main_columns,
-            conditions=main_conditions,
-        )
-        aux_stmt = self.select_aux(
-            test,
-            columns=aux_columns,
-            conditions=aux_conditions,
-        )
-
-        if aux_stmt is None:
-            data_stmt = main_stmt
-        else:
-            main_subquery = main_stmt.subquery()
-            aux_subquery = aux_stmt.subquery()
-            data_join = sa.join(
-                main_subquery,
-                aux_subquery,
-                main_subquery.c.seq_id == aux_subquery.c.seq_id,
-                isouter=True,
-            )
-            data_stmt = sa.select(
-                *main_subquery.c,
-                *(column for column in aux_subquery.c if column.name != "seq_id"),
-            ).select_from(data_join)
-
-        return data_stmt
-
-    def get_main(
-        self,
-        test: Test,
-        columns: Columns | None = None,
-        conditions: Conditions | None = None,
-        naming: Naming = NAMING,
-        transform: bool = TRANSFORM,
-        **options,
     ) -> pl.DataFrame:
-        schema = get_data_schema(self.get_version(), test["dev_uid"])["main"]
-        if columns is None:
-            columns = list(schema.keys())
-        stmt = self.select_main(test, columns=columns, conditions=conditions)
-        main = self.query(stmt, **options).cast(
-            {col: typ for col, typ in schema.items() if col in columns}
+        stmt, schema = self.select_main_data(test, conditions=conditions)
+        return transform_data(
+            self.query(stmt, schema_overrides=schema),
+            self.get_version(),
+            test["dev_uid"],
         )
-        if transform:
-            main = transformations.transform(main, self.get_version(), test["dev_uid"])
-        return bdf.convert(main, "bts", naming)
 
-    def get_aux(
+    def get_aux_data(
         self,
         test: Test,
-        columns: Columns | None = None,
         conditions: Conditions | None = None,
-        naming: Naming = NAMING,
-        transform: bool = TRANSFORM,
-        **options,
-    ) -> pl.DataFrame:
-        schema = get_data_schema(self.get_version(), test["dev_uid"])["aux"]
-        if columns is None:
-            columns = list(schema.keys())
-        stmt = self.select_aux(test, columns=columns, conditions=conditions)
+    ) -> pl.DataFrame | None:
+        stmt, schema = self.select_aux_data(test, conditions=conditions)
         if stmt is None:
-            aux = pl.DataFrame(
-                schema={col: typ for col, typ in schema.items() if col in columns}
-            )
+            return None
         else:
-            aux = self.query(stmt, **options).cast(
-                {col: typ for col, typ in schema.items() if col in columns}
+            return transform_data(
+                self.query(stmt, schema_overrides=schema),
+                self.get_version(),
+                test["dev_uid"],
             )
-        if transform:
-            aux = transformations.transform(aux, self.get_version(), test["dev_uid"])
 
-        return bdf.convert(aux, "bts", naming)
-
-    def _get_data_local(
-        self,
-        test: Test,
-        main_columns: Columns | None = None,
-        aux_columns: Columns | None = None,
-        main_conditions: Conditions | None = None,
-        aux_conditions: Conditions | None = None,
-        **options,
-    ) -> pl.DataFrame:
-
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            main_future = executor.submit(
-                self.get_main,
-                test=test,
-                columns=main_columns,
-                conditions=main_conditions,
-                naming="bts",
-                transform=False,
-                **options,
-            )
-            aux_future = executor.submit(
-                self.get_aux,
-                test=test,
-                columns=aux_columns,
-                conditions=aux_conditions,
-                naming="bts",
-                transform=False,
-                **options,
-            )
-            main_result = main_future.result()
-            aux_result = aux_future.result()
-        return main_result.join(aux_result, on="seq_id", how="left")
-
-    def _get_data_database(
-        self,
-        test: Test,
-        main_columns: Columns | None = None,
-        aux_columns: Columns | None = None,
-        main_conditions: Conditions | None = None,
-        aux_conditions: Conditions | None = None,
-        **options,
-    ) -> pl.DataFrame:
-        main_stmt = self.select_main(
-            test,
-            columns=main_columns,
-            conditions=main_conditions,
-            **options,
+    def get_step_count(self, test: Test):
+        """
+        Counts the steps of the test
+        Performs a ROW_NUMBER() count over cycle - step_id - step_changecount combination to determine the step count.
+        """
+        q1 = f"SELECT DISTINCT cycle, step_id, step_changecount FROM {test['main_first_table']} WHERE unit_id={test['unit_id']} AND chl_id={test['chl_id']} AND test_id={test['test_id']}"
+        q2 = (
+            f"SELECT DISTINCT cycle, step_id, step_changecount FROM {test['main_second_table']}"
+            if test["main_second_table"] is not None
+            else None
         )
-        aux_stmt = self.select_aux(
-            test,
-            columns=aux_columns,
-            conditions=aux_conditions,
-            **options,
-        )
-        if aux_stmt is None:
-            data_stmt = main_stmt
+        if q2 is None:
+            query = q1
         else:
-            main_subquery = main_stmt.subquery()
-            aux_subquery = aux_stmt.subquery()
-            data_join = sa.join(
-                main_subquery,
-                aux_subquery,
-                main_subquery.c.seq_id == aux_subquery.c.seq_id,
-            )
-            data_stmt = sa.select(
-                *main_subquery.c,
-                *(column for column in aux_subquery.c if column.name != "seq_id"),
-            ).select_from(data_join)
-        schemas = get_data_schema(self.get_version(), test["dev_uid"])
-        schema = {**schemas["main"], **schemas["aux"]}
-        data = self.query(data_stmt, **options)
-        return data.cast(
-            {col: typ for col, typ in schema.items() if col in data.columns}
+            query = f"{q1} UNION {q2}"
+        return (
+            self.query(query)
+            .sort("cycle", "step_id", "step_changecount")
+            .with_row_count("step_count")
         )
+
+    def get_first_atime(self, test: Test) -> datetime.datetime:
+        """
+        Fetches the first atime of the test.
+        """
+        query = f"SELECT MIN(test_atime) AS first_atime FROM {test['main_first_table']} WHERE unit_id={test['unit_id']} AND chl_id={test['chl_id']} AND test_id={test['test_id']}"
+        result = self.query(query, schema_overrides={"first_atime": datetime.datetime})
+        return result.select("first_atime").to_series().item()
+
+    def get_record_count(self, test: Test):
+        """
+        Counts the records of the test in the main table.
+        """
+        if test["main_second_table"] is None:
+            query = f"SELECT MAX(seq_id) AS record_count FROM {test['main_first_table']} WHERE unit_id={test['unit_id']} AND chl_id={test['chl_id']} AND test_id={test['test_id']}"
+        else:
+            query = (
+                f"SELECT MAX(seq_id) AS record_count FROM {test['main_second_table']}"
+            )
+        result = self.query(query, schema_overrides={"record_count": int})
+        return result.select("record_count").to_series().item()
+
+    def get_cycle_count(self, test: Test):
+        """
+        Counts the cycles of the test in the main table.
+        """
+        if test["main_second_table"] is None:
+            query = f"SELECT MAX(cycle) AS cycle_count FROM {test['main_first_table']} WHERE unit_id={test['unit_id']} AND chl_id={test['chl_id']} AND test_id={test['test_id']}"
+        else:
+            query = f"SELECT MAX(cycle) AS cycle_count FROM {test['main_second_table']}"
+        result = self.query(query, schema_overrides={"cycle_count": int})
+        return result.select("cycle_count").to_series().item()
+
+    def get_counts(self, test: Test) -> dict:
+        """
+        Fetches both the record count and cycle count for the test.
+        """
+        if test["main_second_table"] is None:
+            query = f"SELECT MAX(seq_id) AS record_count, MAX(cycle) AS cycle_count FROM {test['main_first_table']} WHERE unit_id={test['unit_id']} AND chl_id={test['chl_id']} AND test_id={test['test_id']}"
+        else:
+            query = f"SELECT MAX(seq_id) AS record_count, MAX(cycle) AS cycle_count FROM {test['main_second_table']}"
+        result = self.query(
+            query, schema_overrides={"record_count": int, "cycle_count": int}
+        )
+        return result.to_dicts()[0]  # Return the first (and only) row as a dictionary
 
     def get_data(
         self,
         test: Test,
         conditions: Conditions | None = None,
-        naming: Naming = NAMING,
-        transform: bool = TRANSFORM,
-        join: Join = JOIN,
-        **options,
-    ) -> pl.DataFrame:
-        """Fetch and join main and auxiliary data for a test.
-
-        Args:
-            test: Test metadata identifying the data tables.
-            conditions: Filters using BTS names, BDF codes, or exact BDF
-                labels. For example, {"Cycle Count / 1": (4, 100)} selects
-                inclusive cycle bounds. Names are normalized before schema
-                filtering; keys absent from both schemas are ignored. Values
-                use raw database units, regardless of transform or naming.
-            naming: Output column convention: "bts", "code", or "label".
-            transform: Apply version/device-specific transformations after
-                fetching and joining the data.
-            join: "database" for a SQL join or "local" for parallel fetches
-                followed by a Polars left join.
-            **options: Additional arguments forwarded to the selected fetch
-                path. The database path also forwards them to SQL selectors.
-
-        Returns:
-            Joined data with the requested transformations and column naming.
-
-        Raises:
-            ValueError: If join is not "database" or "local".
-        """
-        schemas = get_data_schema(self.get_version(), test["dev_uid"])
-        main_columns = list(schemas["main"].keys())
-        main_columns.remove("test_tmp")
-        aux_columns = ["seq_id", "auxchl_id", "test_tmp"]
+        naming: bdf.Naming = bdf.DEFAULT,
+        threaded: bool = False,
+    ) -> TestData:
+        if naming not in bdf.VALID:
+            raise ValueError(f"Invalid naming: {naming}")
         if conditions is None:
             main_conditions = None
             aux_conditions = None
         else:
-            conditions = conditions_to_bts(conditions)
+            schemas = get_data_schema(self.get_version(), test["dev_uid"])
+            conditions_bts = conditions_to_bts(conditions)
             main_conditions = {
-                col: value
-                for col, value in conditions.items()
+                col: cond
+                for col, cond in conditions_bts.items()
                 if col in schemas["main"]
             }
             aux_conditions = {
-                col: value for col, value in conditions.items() if col in schemas["aux"]
+                col: cond
+                for col, cond in conditions_bts.items()
+                if col in schemas["aux"]
             }
-        if join == "database":
-            data = self._get_data_database(
-                test=test,
-                main_columns=main_columns,
-                aux_columns=aux_columns,
-                main_conditions=main_conditions,
-                aux_conditions=aux_conditions,
-                **options,
-            )
-        elif join == "local":
-            data = self._get_data_local(
-                test=test,
-                main_columns=main_columns,
-                aux_columns=aux_columns,
-                main_conditions=main_conditions,
-                aux_conditions=aux_conditions,
-                **options,
-            )
+        if threaded:
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                futures = {
+                    "step_count": executor.submit(
+                        self.get_step_count,
+                        test=test,
+                    ),
+                    "first_atime": executor.submit(
+                        self.get_first_atime,
+                        test=test,
+                    ),
+                    "main": executor.submit(
+                        self.get_main_data,
+                        test=test,
+                        conditions=main_conditions,
+                    ),
+                    "aux": executor.submit(
+                        self.get_aux_data,
+                        test=test,
+                        conditions=aux_conditions,
+                    ),
+                }
+
+                steps = futures["step_count"].result()
+                first_atime = futures["first_atime"].result()
+                main = futures["main"].result()
+                aux = futures["aux"].result()
         else:
-            raise ValueError(f"Invalid join type: {join}")
+            steps = self.get_step_count(
+                test=test,
+            )
+            first_atime = self.get_first_atime(test)
 
-        if transform:
-            data = transformations.transform(data, self.get_version(), test["dev_uid"])
+            main = self.get_main_data(
+                test=test,
+                conditions=main_conditions,
+            )
 
-        return bdf.convert(data, "bts", naming)
-
-    def get_stats(self, test: Test) -> dict:
-        """
-        Not safe for missing data,
-        i.e. returns
-        - record_count: MAX(seq_id)
-        - cycle_count: MAX(cycle)
-        """
-        if test["main_second_table"] is None:
-            table = test["main_first_table"]
-            conditions = {
-                "unit_id": test["unit_id"],
-                "chl_id": test["chl_id"],
-                "test_id": test["test_id"],
-            }
-        else:
-            table = test["main_second_table"]
-            conditions = None
-
-        t = self.select_table(
-            table, columns=["seq_id", "cycle"], conditions=conditions
-        ).subquery()
-        stmt = sa.select(
-            sa.func.max(t.c["seq_id"]).label("record_count"),
-            sa.func.max(t.c["cycle"]).label("cycle_count"),
+            aux = self.get_aux_data(
+                test=test,
+                conditions=aux_conditions,
+            )
+        return TestData(
+            main=main.with_columns(
+                (pl.col("test_atime") - first_atime)
+                .dt.total_seconds()
+                .alias("test_totaltime")
+            ).join(steps, on=("cycle", "step_id", "step_changecount"), how="left"),
+            aux=aux,
+            naming=naming,
         )
-        result = self.query(stmt)
-        return result.to_dicts()[0]
