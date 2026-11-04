@@ -1,6 +1,6 @@
 [project]
 name = "neware-sql"
-version = "0.2.0"
+version = "0.3.0"
 description = "Add your description here"
 readme = "README.md"
 authors = [
@@ -8,10 +8,7 @@ authors = [
 ]
 requires-python = ">=3.11"
 dependencies = [
-    "adlfs>=2026.8.0",
-    "pandas>=3.0.4",
     "polars",
-    "pyarrow>=24.0.0",
     "pymysql>=1.2.0",
     "sqlalchemy",
 ]
@@ -20,7 +17,6 @@ dependencies = [
 examples = [
     "dotenv>=0.9.9",
     "ipykernel>=7.4.0",
-    "matplotlib>=3.11.2",
     "nbformat>=5.11.1",
     "plotly>=7.1.0",
 ]
