@@ -37,7 +37,8 @@ class TestData:
     def aux(self) -> pl.DataFrame | None:
         if self._aux is None:
             return None
-        return bdf.convert(self._aux, "bts", self._naming)
+
+        return bdf.convert(self._pivot_aux(), "bts", self._naming)
 
     @property
     def data(self) -> pl.DataFrame:
@@ -46,10 +47,26 @@ class TestData:
         else:
             return bdf.convert(
                 self._main.drop("test_tmp").join(
-                    self._aux.select("auxchl_id", "seq_id", "test_tmp"),
+                    self._pivot_aux().select(
+                        "seq_id", pl.selectors.starts_with("test_tmp")
+                    ),
                     on="seq_id",
                     how="left",
                 ),
                 "bts",
                 self._naming,
             )
+
+    def _pivot_aux(self) -> pl.DataFrame:
+        if self._aux is None:
+            raise ValueError("Auxiliary data is not available")
+        return self._aux.pivot(
+            "auxchl_id",
+            index="seq_id",
+            values="test_tmp",
+            separator="_",
+            column_naming="combine",
+            aggregate_function=None,  # error on duplicates
+        ).with_columns(
+            pl.mean_horizontal(pl.selectors.starts_with("test_tmp_")).alias("test_tmp")
+        )
