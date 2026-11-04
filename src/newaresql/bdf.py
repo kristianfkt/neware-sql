@@ -16,7 +16,7 @@ class Column(TypedDict):
     label: str
 
 
-columns = [
+COLUMNS = [
     Column(bts="dev_uid", code="device_uid", label="Device UID / 1"),
     Column(bts="unit_id", code="unit_id", label="Unit ID / 1"),
     Column(bts="chl_id", code="channel_id", label="Channel ID / 1"),
@@ -60,8 +60,8 @@ columns = [
     Column(bts="test_eng", code="step_energy_wh", label="Step Energy / Wh"),
 ]
 
-MAPPINGS = {
-    (src, dst): {col[src]: col[dst] for col in columns}
+MAPS = {
+    (src, dst): {col[src]: col[dst] for col in COLUMNS}
     for src in ["bts", "code", "label"]
     for dst in ["bts", "code", "label"]
 }
@@ -80,6 +80,6 @@ def convert(
     if source == destination:
         return data
 
-    mapping = MAPPINGS.get((source, destination), {})
+    mapping = MAPS.get((source, destination), {})
     mapping = {k: v for k, v in mapping.items() if k in data.columns}
     return data.rename(mapping, strict=False)
