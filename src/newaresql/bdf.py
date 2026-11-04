@@ -3,7 +3,8 @@ from typing import Literal, TypedDict
 import polars as pl
 
 Naming = Literal["bts", "code", "label"]
-VALID: set[str] = {"bts", "code", "label"}
+
+VALID: set[Naming] = {"bts", "code", "label"}
 DEFAULT: Naming = "label"
 
 
@@ -25,7 +26,7 @@ COLUMNS = [
     Column(bts="step_id", code="step_id", label="Step ID / 1"),
     Column(bts="step_type", code="step_type", label="Step Type / 1"),
     Column(bts="step_index", code="step_index", label="Step Index / 1"),
-    Column(bts="seq_id", code="record_count", label="Record Count / 1"),
+    Column(bts="seq_id", code="record_index", label="Record Index / 1"),
     Column(bts="step_count", code="step_count", label="Step Count / 1"),
     Column(bts="cycle", code="cycle_count", label="Cycle Count / 1"),
     Column(bts="auxchl_id", code="aux_channel_id", label="Aux Channel ID / 1"),
@@ -36,6 +37,21 @@ COLUMNS = [
     Column(bts="test_vol", code="voltage_volt", label="Voltage / V"),
     Column(bts="test_cur", code="current_ampere", label="Current / A"),
     Column(bts="test_tmp", code="temperature_celsius", label="Temperature / degC"),
+    Column(
+        bts="test_tmp_1", code="temperature_celsius_1", label="Temperature T1/ degC"
+    ),
+    Column(
+        bts="test_tmp_2", code="temperature_celsius_2", label="Temperature T2/ degC"
+    ),
+    Column(
+        bts="test_tmp_3", code="temperature_celsius_3", label="Temperature T3/ degC"
+    ),
+    Column(
+        bts="test_tmp_4", code="temperature_celsius_4", label="Temperature T4/ degC"
+    ),
+    Column(
+        bts="test_tmp_5", code="temperature_celsius_5", label="Temperature T5/ degC"
+    ),
     Column(bts="test_pow", code="power_watt", label="Power / W"),
     Column(
         bts="test_capchg",
@@ -82,4 +98,4 @@ def convert(
 
     mapping = MAPS.get((source, destination), {})
     mapping = {k: v for k, v in mapping.items() if k in data.columns}
-    return data.rename(mapping, strict=False)
+    return data.rename(mapping, strict=False).select(*mapping.values())
