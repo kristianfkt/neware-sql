@@ -23,6 +23,12 @@ class TestData:
     def naming(self) -> bdf.Naming:
         return self._naming
 
+    @naming.setter
+    def naming(self, value: bdf.Naming) -> None:
+        if value not in bdf.VALID:
+            raise ValueError(f"Invalid naming: {value}")
+        self._naming = value
+
     @property
     def main(self) -> pl.DataFrame:
         return bdf.convert(self._main, "bts", self._naming)

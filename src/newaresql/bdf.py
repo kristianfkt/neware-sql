@@ -3,7 +3,8 @@ from typing import Literal, TypedDict
 import polars as pl
 
 Naming = Literal["bts", "code", "label"]
-DEFAULT = "label"
+VALID: set[str] = {"bts", "code", "label"}
+DEFAULT: Naming = "label"
 
 
 class Column(TypedDict):
@@ -65,7 +66,6 @@ MAPS = {
     for src in ["bts", "code", "label"]
     for dst in ["bts", "code", "label"]
 }
-VALID = {"bts", "code", "label"}
 
 
 def convert(
