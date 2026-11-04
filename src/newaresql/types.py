@@ -18,5 +18,4 @@ Conditions = dict[str, Condition]
 
 
 Test = dict[str, Any]
-Naming = Literal["bts", "code", "label"]
 Columns = str | list[str]
