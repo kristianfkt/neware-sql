@@ -16,9 +16,6 @@ dependencies = [
     "sqlalchemy",
 ]
 
-[project.scripts]
-neware-sql = "newaresql:main"
-
 [project.optional-dependencies]
 examples = [
     "dotenv>=0.9.9",

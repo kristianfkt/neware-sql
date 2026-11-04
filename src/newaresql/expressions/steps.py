@@ -23,7 +23,7 @@ STEPS = {
     "std_test_pow": pl.col("test_pow").std(),
     #
     "test_cap": pl.col("test_cap").last(),
-    "test_eng": pl.col("test_ene").last(),
+    "test_eng": pl.col("test_eng").last(),
 }
 
 
