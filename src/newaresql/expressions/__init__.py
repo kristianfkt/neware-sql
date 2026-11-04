@@ -89,6 +89,8 @@ def apply_expressions(
                 return False
             elif dependency in present:
                 continue
+            elif (dependency not in pending) and (dependency not in present):
+                return False
         return True
 
     pending = set(expressions.keys())
@@ -106,6 +108,7 @@ def apply_expressions(
         else:
             logger.debug("Expression %s is deferred", alias)
             deferred[alias] = expression
+
     if ready and deferred:
         logger.debug(
             "Applying expressions %s and deferring %s",
@@ -114,13 +117,13 @@ def apply_expressions(
         )
 
         return apply_expressions(deferred, data.with_columns(**ready))
+
     elif ready:
         logger.debug("Applying expressions %s", list(ready.keys()))
         return data.with_columns(**ready)
     else:
         logger.debug("No expressions are ready to be applied, returning data as is")
-    logger.debug("Finished applying expressions")
-    return data
+        return data
 
     # if not ready:
     #     logger.debug("No expressions are ready to be applied, returning data as is")
