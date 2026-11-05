@@ -1,11 +1,11 @@
 # Neware SQL
 
-Read Neware BTS test data from a MySQL database into Polars DataFrames.
+Read Neware BTS test data from a MySQL database or a local Parquet copy into Polars DataFrames.
 
 ## Requirements
 
 - Python 3.11 or later
-- Access to a Neware BTS MySQL database
+- Access to a Neware BTS MySQL database to fetch or synchronize data; an existing local copy can be read offline
 
 Install from a local checkout:
 
@@ -89,6 +89,41 @@ main_bts = result.main
 ```
 
 Supported values are `"bts"`, `"code"`, and `"label"`; the default is `"label"`.
+
+## Local Storage
+
+Use `newaresql.local` to synchronize test data into a local directory and read it later without a database connection. Set `NEWARE_LOCAL_ROOT` or pass `root` explicitly. Synchronization creates the root if needed and uses the same database credentials as the connector.
+
+```python
+from pathlib import Path
+from newaresql import local
+
+root = Path("./neware-data")
+local.update(root=root)
+
+tests = local.list_tests(root=root)
+if tests:
+    result = local.get_data(tests[0], root=root, naming="code")
+    main = result.main.collect()
+    combined = result.data.collect()
+```
+
+`local.get_tests()` returns a metadata DataFrame, while `local.list_tests()` returns dictionaries. Both return `None` when the root or metadata files are missing. Test dictionaries must contain `dev_uid`, `unit_id`, `chl_id`, and `test_id` to locate their data.
+
+`local.get_data()` returns a `LocalData` object with `main`, `aux`, and `data` properties, using the same naming conventions as database results. It returns lazy Polars frames by default; pass `lazy=False` for eager frames or change `result.lazy` later. Accessing lazy auxiliary data still collects channel IDs to construct the pivot. `aux` is `None` when no auxiliary files exist.
+
+`local.update()` appends data after the highest saved sequence ID for each test. Use `callback` to select tests, `chunk_size` to control the number of sequence IDs requested per chunk, and `workers` for parallel test updates (`None`, `0`, or `1` for sequential updates; `-1` for the thread pool default). An existing connector can be supplied with `connector`. Per-test data update failures are logged and do not stop other tests; check the logs for failures.
+
+```python
+local.update(
+    root=root,
+    callback=lambda test: test["dev_uid"] == 1,
+    chunk_size=100_000,
+    workers=4,
+)
+```
+
+Each test is stored in a `<dev_uid>-<unit_id>-<chl_id>-<test_id>` directory containing metadata and chunked main and auxiliary Parquet files. To remove local data, `local.delete(test, root=root)` removes one test, `local.clean(root=root)` removes immediate subdirectories without `metadata.parquet`, and `local.purge(root=root)` removes all immediate subdirectories. These commands delete Parquet files before removing directories; non-Parquet files or nested directories can prevent removal. Use `clean` and `purge` only on a dedicated local root.
 
 ## Supported Versions
 
