@@ -133,3 +133,7 @@ Each test is stored in a `<dev_uid>-<unit_id>-<chl_id>-<test_id>` directory cont
 ## Development
 
 Version-specific transformations are in `src/newaresql/expressions/`, and database schemas are in `src/newaresql/schemas/`. Column-name mappings between BTS names, BDF codes, and BDF labels are defined in `src/newaresql/bdf.py`.
+
+
+# Known issues
+- Disconnected temperature sensors may a large, false temperature instead of null.  This will be adressed in a later release.
