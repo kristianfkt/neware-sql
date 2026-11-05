@@ -1,7 +1,7 @@
 [project]
 name = "neware-sql"
 version = "0.4.1"
-description = "Add your description here"
+description = "Read Neware BTS test data from MySQL or local Parquet files into Polars DataFrames"
 readme = "README.md"
 authors = [
     { name = "Kristian Fredrik Klepp Thorbjørnsen", email = "kthorbjornsen@corvusenergy.com" }
