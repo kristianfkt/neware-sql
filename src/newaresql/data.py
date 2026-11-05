@@ -1,8 +1,42 @@
 """Result container for transformed main and auxiliary test data."""
 
+from typing import overload
+
 import polars as pl
 
 import newaresql.bdf as bdf
+
+
+@overload
+def pivot_aux(aux: pl.DataFrame) -> pl.DataFrame: ...
+@overload
+def pivot_aux(aux: pl.LazyFrame) -> pl.LazyFrame: ...
+def pivot_aux(aux: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame | pl.LazyFrame:
+    """Pivot auxiliary measurements into one row per record.
+
+    Returns:
+        A frame with one column per auxiliary channel and a mean
+        ``test_tmp`` column.
+
+    Raises:
+        ValueError: If auxiliary data is unavailable.
+    """
+    if isinstance(aux, pl.DataFrame):
+        on_columns = aux.select("auxchl_id").to_series().unique().to_list()
+    else:
+        on_columns = aux.select("auxchl_id").unique().collect().to_series().to_list()
+
+    return aux.pivot(
+        "auxchl_id",
+        on_columns=on_columns,
+        index="seq_id",
+        values="test_tmp",
+        separator="_",
+        column_naming="combine",
+        aggregate_function=None,  # error on duplicates
+    ).with_columns(
+        pl.mean_horizontal(pl.selectors.starts_with("test_tmp_")).alias("test_tmp")
+    )
 
 
 class TestData:
@@ -56,7 +90,7 @@ class TestData:
         if self._aux is None:
             return None
 
-        return bdf.convert(self._pivot_aux(), "bts", self._naming)
+        return bdf.convert(pivot_aux(self._aux), "bts", self._naming)
 
     @property
     def data(self) -> pl.DataFrame:
@@ -70,35 +104,10 @@ class TestData:
         else:
             return bdf.convert(
                 self._main.drop("test_tmp").join(
-                    self._pivot_aux().select(
-                        "seq_id", pl.selectors.starts_with("test_tmp")
-                    ),
+                    pivot_aux(self._aux),
                     on="seq_id",
                     how="left",
                 ),
                 "bts",
                 self._naming,
             )
-
-    def _pivot_aux(self) -> pl.DataFrame:
-        """Pivot auxiliary measurements into one row per record.
-
-        Returns:
-            A frame with one column per auxiliary channel and a mean
-            ``test_tmp`` column.
-
-        Raises:
-            ValueError: If auxiliary data is unavailable.
-        """
-        if self._aux is None:
-            raise ValueError("Auxiliary data is not available")
-        return self._aux.pivot(
-            "auxchl_id",
-            index="seq_id",
-            values="test_tmp",
-            separator="_",
-            column_naming="combine",
-            aggregate_function=None,  # error on duplicates
-        ).with_columns(
-            pl.mean_horizontal(pl.selectors.starts_with("test_tmp_")).alias("test_tmp")
-        )
