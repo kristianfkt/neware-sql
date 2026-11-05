@@ -145,3 +145,4 @@ cython_debug/
 
 # User - specific folder
 testing.ipynb
+examples/data/
