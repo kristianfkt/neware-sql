@@ -18,7 +18,7 @@ from newaresql.schemas import get_data_schema
 from newaresql.types import Columns, Conditions, Test
 
 
-class MissingCredentialsError(Exception):
+class MissingCredentialsError(ValueError):
     """Raised when required database credentials are missing."""
 
 
@@ -139,27 +139,31 @@ class Connector:
                 ``NEWARE_BTS_PASSWORD``.
             database: Database name, falling back to ``NEWARE_BTS_DATABASE``.
         """
-        cred = {
+        provided = {
             "host": host,
             "port": port,
             "username": username,
             "password": password,
             "database": database,
         }
-        for name, item in cred.items():
-            if item is None:
-                cred[name] = os.getenv(f"NEWARE_BTS_{name.upper()}")
-        if isinstance(cred["port"], str):
-            cred["port"] = int(cred["port"])
-        for name, item in cred.items():
-            if item is None:
-                raise MissingCredentialsError(f"Database {name} is required.")
+        credentials = {
+            key: os.getenv(f"NEWARE_BTS_{key.upper()}") if value is None else value
+            for key, value in provided.items()
+        }
+        if isinstance(credentials["port"], str):
+            credentials["port"] = int(credentials["port"])
 
-        self._host = cred["host"]
-        self._port = cred["port"]
-        self._username = cred["username"]
-        self._password = cred["password"]
-        self._database = cred["database"]
+        _missing = [key for key, value in credentials.items() if value is None]
+        if _missing:
+            raise MissingCredentialsError(
+                f"Missing credentials for: {', '.join(_missing)}"
+            )
+
+        self._host = credentials["host"]
+        self._port = credentials["port"]
+        self._username = credentials["username"]
+        self._password = credentials["password"]
+        self._database = credentials["database"]
         self._url = sa.make_url(
             f"mysql+pymysql://{self._username}:{self._password}@{self._host}:{self._port}/{self._database}"
         )
