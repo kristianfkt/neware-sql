@@ -1,6 +1,6 @@
 """Column metadata and conversion between BTS and BDF naming conventions."""
 
-from typing import Literal, TypedDict
+from typing import Literal, TypedDict, overload
 
 import polars as pl
 
@@ -84,11 +84,23 @@ MAPS = {
 }
 
 
+@overload
 def convert(
     data: pl.DataFrame,
     source: Naming,
     destination: Naming,
-):
+) -> pl.DataFrame: ...
+@overload
+def convert(
+    data: pl.LazyFrame,
+    source: Naming,
+    destination: Naming,
+) -> pl.LazyFrame: ...
+def convert(
+    data: pl.DataFrame | pl.LazyFrame,
+    source: Naming,
+    destination: Naming,
+) -> pl.DataFrame | pl.LazyFrame:
     """Convert mapped DataFrame columns to another naming convention.
 
     Args:
@@ -111,5 +123,10 @@ def convert(
         return data
 
     mapping = MAPS.get((source, destination), {})
-    mapping = {k: v for k, v in mapping.items() if k in data.columns}
+    schema = (
+        data.columns
+        if isinstance(data, pl.DataFrame)
+        else data.collect_schema().names()
+    )
+    mapping = {k: v for k, v in mapping.items() if k in schema}
     return data.rename(mapping, strict=False).select(*mapping.values())
