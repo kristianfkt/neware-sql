@@ -7,7 +7,19 @@ Read Neware BTS test data from a MySQL database or a local Parquet copy into Pol
 - Python 3.11 or later
 - Access to a Neware BTS MySQL database to fetch or synchronize data; an existing local copy can be read offline
 
-Install from a local checkout:
+Install from PyPI:
+
+```bash
+python -m pip install neware-sql
+```
+
+To install the dependencies for the example notebooks as well:
+
+```bash
+python -m pip install "neware-sql[examples]"
+```
+
+To install from a local checkout instead:
 
 ```bash
 python -m pip install .
@@ -112,12 +124,12 @@ if tests:
 
 `local.get_data()` returns a `LocalData` object with `main`, `aux`, and `data` properties, using the same naming conventions as database results. It returns lazy Polars frames by default; pass `lazy=False` for eager frames or change `result.lazy` later. Accessing lazy auxiliary data still collects channel IDs to construct the pivot. `aux` is `None` when no auxiliary files exist.
 
-`local.update()` appends data after the highest saved sequence ID for each test. Use `callback` to select tests, `chunk_size` to control the number of sequence IDs requested per chunk, and `workers` for parallel test updates (`None`, `0`, or `1` for sequential updates; `-1` for the thread pool default). An existing connector can be supplied with `connector`. Per-test data update failures are logged and do not stop other tests; check the logs for failures.
+`local.update()` appends data after the highest saved sequence ID for each test. Use `callback` to select tests, `chunk_size` to control the number of sequence IDs requested per chunk, and `workers` for parallel test updates (`None`, `0`, or `1` for sequential updates; `-1` for the thread pool default). An existing connector can be supplied with `connector`. Per-test data update failures are logged and do not stop other tests. The function does not return a success report, so check the logs for failures.
 
 ```python
 local.update(
     root=root,
-    callback=lambda test: test["dev_uid"] == 1,
+    callback=lambda test: test["chl_id"] == 1,
     chunk_size=100_000,
     workers=4,
 )
@@ -135,5 +147,6 @@ Each test is stored in a `<dev_uid>-<unit_id>-<chl_id>-<test_id>` directory cont
 Version-specific transformations are in `src/newaresql/expressions/`, and database schemas are in `src/newaresql/schemas/`. Column-name mappings between BTS names, BDF codes, and BDF labels are defined in `src/newaresql/bdf.py`.
 
 
-# Known issues
-- Disconnected temperature sensors may a large, false temperature instead of null.  This will be adressed in a later release.
+## Known Issues
+
+- Disconnected temperature sensors may report a large, false temperature instead of null. This will be addressed in a later release.
