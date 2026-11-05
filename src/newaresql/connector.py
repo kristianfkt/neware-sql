@@ -18,8 +18,8 @@ from newaresql.schemas import get_data_schema
 from newaresql.types import Columns, Conditions, Test
 
 
-class MissingCredentialsError(ValueError):
-    """Raised when required database credentials are missing."""
+class MissingConfigurationError(ValueError):
+    """Raised when required database configuration values are missing."""
 
 
 def conditions_to_bts(conditions: Conditions) -> Conditions:
@@ -146,24 +146,24 @@ class Connector:
             "password": password,
             "database": database,
         }
-        credentials = {
+        config = {
             key: os.getenv(f"NEWARE_BTS_{key.upper()}") if value is None else value
             for key, value in provided.items()
         }
-        if isinstance(credentials["port"], str):
-            credentials["port"] = int(credentials["port"])
+        if isinstance(config["port"], str):
+            config["port"] = int(config["port"])
 
-        _missing = [key for key, value in credentials.items() if value is None]
-        if _missing:
-            raise MissingCredentialsError(
-                f"Missing credentials for: {', '.join(_missing)}"
+        missing = [key for key, value in config.items() if value is None]
+        if missing:
+            raise MissingConfigurationError(
+                f"Missing configuration for: {', '.join(missing)}"
             )
 
-        self._host = credentials["host"]
-        self._port = credentials["port"]
-        self._username = credentials["username"]
-        self._password = credentials["password"]
-        self._database = credentials["database"]
+        self._host = config["host"]
+        self._port = config["port"]
+        self._username = config["username"]
+        self._password = config["password"]
+        self._database = config["database"]
         self._url = sa.make_url(
             f"mysql+pymysql://{self._username}:{self._password}@{self._host}:{self._port}/{self._database}"
         )
