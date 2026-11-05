@@ -18,6 +18,10 @@ from newaresql.schemas import get_data_schema
 from newaresql.types import Columns, Conditions, Test
 
 
+class MissingCredentialsError(Exception):
+    """Raised when required database credentials are missing."""
+
+
 def conditions_to_bts(conditions: Conditions) -> Conditions:
     """Convert BDF code names and labels in condition keys to BTS names.
 
@@ -135,11 +139,27 @@ class Connector:
                 ``NEWARE_BTS_PASSWORD``.
             database: Database name, falling back to ``NEWARE_BTS_DATABASE``.
         """
-        self._host = host or os.getenv("NEWARE_BTS_HOST")
-        self._port = port or os.getenv("NEWARE_BTS_PORT")
-        self._username = username or os.getenv("NEWARE_BTS_USERNAME")
-        self._password = password or os.getenv("NEWARE_BTS_PASSWORD")
-        self._database = database or os.getenv("NEWARE_BTS_DATABASE")
+        cred = {
+            "host": host,
+            "port": port,
+            "username": username,
+            "password": password,
+            "database": database,
+        }
+        for name, item in cred.items():
+            if item is None:
+                cred[name] = os.getenv(f"NEWARE_BTS_{name.upper()}")
+        if isinstance(cred["port"], str):
+            cred["port"] = int(cred["port"])
+        for name, item in cred.items():
+            if item is None:
+                raise MissingCredentialsError(f"Database {name} is required.")
+
+        self._host = cred["host"]
+        self._port = cred["port"]
+        self._username = cred["username"]
+        self._password = cred["password"]
+        self._database = cred["database"]
         self._url = sa.make_url(
             f"mysql+pymysql://{self._username}:{self._password}@{self._host}:{self._port}/{self._database}"
         )
