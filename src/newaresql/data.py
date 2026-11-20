@@ -99,7 +99,7 @@ class TestData:
         When auxiliary data is available, the joined frame includes individual
         temperature channels and their per-record mean.
         """
-        if self._aux is None:
+        if (self._aux is None) or (self._aux.is_empty()):
             return self.main
         else:
             return bdf.convert(
