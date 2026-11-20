@@ -87,7 +87,7 @@ class TestData:
     @property
     def aux(self) -> pl.DataFrame | None:
         """Return pivoted auxiliary measurements, or ``None`` if unavailable."""
-        if self._aux is None:
+        if (self._aux is None) or (self._aux.is_empty()):
             return None
 
         return bdf.convert(pivot_aux(self._aux), "bts", self._naming)
