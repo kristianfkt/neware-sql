@@ -93,7 +93,7 @@ class TestData:
         return bdf.convert(pivot_aux(self._aux), "bts", self._naming)
 
     @property
-    def data(self) -> pl.DataFrame:
+    def merged(self) -> pl.DataFrame:
         """Return main data joined with pivoted auxiliary measurements.
 
         When auxiliary data is available, the joined frame includes individual
@@ -111,3 +111,8 @@ class TestData:
                 "bts",
                 self._naming,
             )
+
+    @property
+    def data(self) -> pl.DataFrame:
+        """Return main data merged with auxiliary measurements, if available."""
+        return self.merged
