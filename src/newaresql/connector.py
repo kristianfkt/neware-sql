@@ -541,7 +541,7 @@ class Connector:
         return (
             self.query(query)
             .sort("cycle", "step_id", "step_changecount")
-            .with_row_count("step_count")
+            .with_row_index("step_count")
         )
 
     def get_first_atime(self, test: Test) -> datetime.datetime:
